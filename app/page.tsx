@@ -8,6 +8,7 @@ import {
   ChevronLeft,
   ChevronRight,
   CloudSun,
+  ExternalLink,
   FileUp,
   GraduationCap,
   LayoutGrid,
@@ -31,12 +32,12 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
-import { GoogleCalendar } from "@/components/google-calendar";
+import { GoogleCalendarStatus, useGoogleCalendar } from "@/components/google-calendar";
 import { extractAcademicEvents, extractTimetableEntries } from "@/lib/pdf-import";
 
 type Task = { id: number; text: string; tag: string; done: number | boolean };
 type Shortcut = { id: number; label: string; url: string; color: string };
-type Schedule = { id: number; date: string; title: string; time: string | null; location: string | null; source: string };
+type Schedule = { id: number | string; date: string; title: string; time: string | null; location: string | null; source: string; htmlUrl?: string };
 type TimetableEntry = { id: number; day: number; period: number; subject: string; location: string | null };
 type AcademicImport = { id: number; fileName: string; kind: "calendar" | "timetable"; detectedCount: number; createdAt: number };
 type ClassStatus = { total: number; attendance: number; absence: number; earlyDismissal: number; tardy: number };
@@ -64,7 +65,7 @@ const LayoutContext = createContext<LayoutContextValue | null>(null);
 
 const widgetNames = [
   ["clock", "디지털 시계"], ["weather", "날씨"], ["shortcuts", "바로가기"],
-  ["calendar", "Google 캘린더"], ["stats", "학급 현황"], ["timetable", "시간표"],
+  ["calendar", "통합 캘린더"], ["stats", "학급 현황"], ["timetable", "시간표"],
   ["tasks", "할 일"], ["schedule", "다음 일정"],
 ] as const;
 
@@ -228,7 +229,8 @@ export default function Home() {
   const [hidden, setHidden] = useState<Record<string, boolean>>({});
   const [addMode, setAddMode] = useState<AddMode>(null);
   const [viewDate, setViewDate] = useState(() => new Date());
-  const [calendarSource, setCalendarSource] = useState<"google" | "saved">("google");
+  const [calendarView, setCalendarView] = useState<"month" | "list">("month");
+  const googleCalendar = useGoogleCalendar(dateKey(viewDate).slice(0, 7));
   const [selectedDate, setSelectedDate] = useState(() => dateKey(new Date()));
   const [presetCell, setPresetCell] = useState<{ day: number; period: number } | null>(null);
   const [newTask, setNewTask] = useState("");
@@ -310,8 +312,13 @@ export default function Home() {
     };
   }, [viewDate]);
 
-  const selectedEvents = data.schedules.filter((event) => event.date === selectedDate);
-  const upcoming = data.schedules.filter((event) => event.date >= dateKey(new Date())).slice(0, 4);
+  const sortSchedules = (a: Schedule, b: Schedule) => a.date.localeCompare(b.date) || (a.time || "").localeCompare(b.time || "") || a.title.localeCompare(b.title);
+  const combinedSchedules: Schedule[] = [...data.schedules, ...googleCalendar.events].sort(sortSchedules);
+  const selectedEvents = combinedSchedules.filter((event) => event.date === selectedDate);
+  const monthEvents = combinedSchedules.filter((event) => event.date.startsWith(dateKey(viewDate).slice(0, 7)));
+  const upcoming: Schedule[] = [...data.schedules.filter((event) => event.date >= dateKey(new Date())), ...googleCalendar.upcoming].sort(sortSchedules).slice(0, 4);
+  const sourceColor = (item: Schedule) => item.source === "google" ? "green" : item.source === "pdf" ? "violet" : "blue";
+  const sourceLabel = (item: Schedule) => item.source === "google" ? "Google" : item.source === "pdf" ? "학사 PDF" : "직접 지정";
 
   const mutate = async (url: string, init: RequestInit) => {
     setBusy(true);
@@ -332,7 +339,11 @@ export default function Home() {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
   });
 
-  const deleteResource = (resource: string, id: number) => mutate(`/api/dashboard?resource=${resource}&id=${id}`, { method: "DELETE" });
+  const deleteResource = (resource: string, id: number | string) => mutate(`/api/dashboard?resource=${resource}&id=${id}`, { method: "DELETE" });
+
+  const scheduleAction = (item: Schedule) => item.source === "google"
+    ? <a className="schedule-open" href={item.htmlUrl} target="_blank" rel="noopener noreferrer" aria-label={`${item.title} Google에서 관리`}><ExternalLink size={14} /></a>
+    : <button className="inline-delete" onClick={() => void deleteResource("schedule", item.id)} aria-label={`${item.title} 삭제`}><Trash2 size={13} /></button>;
 
   const addTask = async (event: FormEvent) => {
     event.preventDefault();
@@ -390,7 +401,6 @@ export default function Home() {
       }
       const result = await requestJson("/api/import", { method: "POST", body: form });
       await loadData();
-      if (kind === "calendar") setCalendarSource("saved");
       setImportStatus(`${file.name}에서 ${result.imported}개 ${kind === "calendar" ? "일정" : "수업"}을 가져왔어요.`);
     } catch (reason) {
       setImportStatus("");
@@ -470,29 +480,36 @@ export default function Home() {
         </div>
 
         <div className="column center-column">
-          <Widget id="calendar" title="Google 캘린더" icon={<CalendarDays size={16} />} hidden={hidden} className="calendar-widget google-calendar-widget">
-            <div className="calendar-source-options" role="group" aria-label="캘린더 선택">
-              <button type="button" aria-pressed={calendarSource === "google"} onClick={() => setCalendarSource("google")}>Google 캘린더</button>
-              <button type="button" aria-pressed={calendarSource === "saved"} onClick={() => setCalendarSource("saved")}>저장된 일정 · 학사 PDF</button>
+          <Widget id="calendar" title="통합 캘린더" icon={<CalendarDays size={16} />} hidden={hidden} className="calendar-widget unified-calendar-widget">
+            <GoogleCalendarStatus calendar={googleCalendar} />
+            <div className="unified-calendar-actions">
+              <div className="calendar-view-options" role="group" aria-label="캘린더 보기">
+                <button type="button" aria-pressed={calendarView === "month"} onClick={() => setCalendarView("month")}>월간</button>
+                <button type="button" aria-pressed={calendarView === "list"} onClick={() => setCalendarView("list")}>일정 목록</button>
+              </div>
+              <div className="header-actions"><input ref={calendarFileInput} className="sr-only" type="file" accept="application/pdf" onChange={(event) => void importPdf(event, "calendar")} /><button className="widget-add secondary" disabled={busy} onClick={() => calendarFileInput.current?.click()}><FileUp size={14} /> 학사 PDF</button><button className="widget-add" onClick={() => setAddMode("schedule")}><Plus size={14} /> 일정 지정</button></div>
             </div>
-            {calendarSource === "google" ? <GoogleCalendar /> : <>
-            <div className="saved-calendar-actions"><input ref={calendarFileInput} className="sr-only" type="file" accept="application/pdf" onChange={(event) => void importPdf(event, "calendar")} /><button className="widget-add secondary" disabled={busy} onClick={() => calendarFileInput.current?.click()}><FileUp size={14} /> 학사 PDF</button><button className="widget-add" onClick={() => setAddMode("schedule")}><Plus size={14} /> 일정</button></div>
-            <p className="saved-calendar-note">대시보드에 저장한 일정입니다. Google 캘린더에는 자동으로 추가되지 않아요.</p>
-            <div className="calendar-toolbar"><button className="icon-button" onClick={() => setViewDate(new Date(calendarDays.year, calendarDays.month - 1, 1))} aria-label="이전 달"><ChevronLeft size={17} /></button><strong>{calendarDays.year}년 {calendarDays.month + 1}월</strong><button className="icon-button" onClick={() => setViewDate(new Date(calendarDays.year, calendarDays.month + 1, 1))} aria-label="다음 달"><ChevronRight size={17} /></button></div>
-            <div className="calendar-grid week-row">{week.map((day) => <span key={day}>{day}</span>)}</div>
-            <div className="calendar-grid dates">{calendarDays.days.map((day, index) => {
-              if (!day) return <span key={`empty-${index}`} />;
-              const key = `${calendarDays.year}-${String(calendarDays.month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-              const events = data.schedules.filter((item) => item.date === key);
-              const isToday = key === dateKey(new Date());
-              return <button key={key} className={`${isToday ? "today" : ""} ${selectedDate === key ? "selected" : ""}`} onClick={() => setSelectedDate(key)}><span className="date-number">{day}</span><span className="cell-events">{events.map((item) => <em className={item.source === "pdf" ? "pdf" : ""} key={item.id}>{item.title}</em>)}</span></button>;
-            })}</div>
-            <div className="selected-day-panel">
-              <div><strong>{selectedDate.replaceAll("-", ".")}</strong><button onClick={() => setAddMode("schedule")}><Plus size={13} /> 추가</button></div>
-              {selectedEvents.length ? selectedEvents.map((item) => <article key={item.id}><i className={`dot ${item.source === "pdf" ? "violet-dot" : "blue-dot"}`} /><p><strong>{item.title}</strong><small>{[item.time, item.location, item.source === "pdf" ? "PDF 가져오기" : null].filter(Boolean).join(" · ") || "종일"}</small></p><button onClick={() => void deleteResource("schedule", item.id)} aria-label={`${item.title} 삭제`}><Trash2 size={13} /></button></article>) : <p className="empty-line">선택한 날짜에 일정이 없어요.</p>}
+            <div className="calendar-toolbar">
+              <div className="calendar-month-navigation"><button className="icon-button" onClick={() => { const date = new Date(calendarDays.year, calendarDays.month - 1, 1); setViewDate(date); setSelectedDate(dateKey(date)); }} aria-label="이전 달"><ChevronLeft size={17} /></button><strong>{calendarDays.year}년 {calendarDays.month + 1}월</strong><button className="icon-button" onClick={() => { const date = new Date(calendarDays.year, calendarDays.month + 1, 1); setViewDate(date); setSelectedDate(dateKey(date)); }} aria-label="다음 달"><ChevronRight size={17} /></button></div>
+              <button className="calendar-today" onClick={() => { const date = new Date(); setViewDate(date); setSelectedDate(dateKey(date)); }}>오늘</button>
             </div>
-            <p className="pdf-note">모든 일정은 날짜 칸 안에 바로 표시됩니다.{data.imports.find((item) => item.kind === "calendar") ? ` 최근 학사 PDF: ${data.imports.find((item) => item.kind === "calendar")?.fileName}` : ""}</p>
-            </>}
+            {calendarView === "month" ? <>
+              <div className="calendar-grid week-row">{week.map((day) => <span key={day}>{day}</span>)}</div>
+              <div className="calendar-grid dates">{calendarDays.days.map((day, index) => {
+                if (!day) return <span key={"empty-" + index} />;
+                const key = dateKey(new Date(calendarDays.year, calendarDays.month, day));
+                const events = combinedSchedules.filter((item) => item.date === key);
+                const isToday = key === dateKey(new Date());
+                return <button key={key} aria-label={key + ", 일정 " + events.length + "개"} aria-pressed={selectedDate === key} className={(isToday ? "today " : "") + (selectedDate === key ? "selected" : "")} onClick={() => setSelectedDate(key)}><span className="date-number">{day}</span><span className="cell-events">{events.slice(0, 3).map((item) => <em className={item.source} title={sourceLabel(item) + " · " + item.title} key={item.id}>{item.title}</em>)}{events.length > 3 && <small className="calendar-more">+{events.length - 3}개 더</small>}</span></button>;
+              })}</div>
+              <div className="selected-day-panel">
+                <div><strong>{selectedDate.replaceAll("-", ".")}</strong><button onClick={() => setAddMode("schedule")}><Plus size={13} /> 일정 지정</button></div>
+                {selectedEvents.length ? selectedEvents.map((item) => <article key={item.id}><i className={"dot " + sourceColor(item) + "-dot"} /><p><strong>{item.title}</strong><small>{[item.time || "종일", sourceLabel(item), item.location].filter(Boolean).join(" · ")}</small></p>{scheduleAction(item)}</article>) : <p className="empty-line">선택한 날짜에 일정이 없어요.</p>}
+              </div>
+            </> : <div className="calendar-agenda">
+              {monthEvents.length ? monthEvents.map(item => <article key={item.id}><time dateTime={item.date}>{Number(item.date.slice(8))}<small>{week[new Date(item.date + "T00:00:00").getDay()]}</small></time><i className={"schedule-line " + sourceColor(item)} /><div><strong>{item.title}</strong><small>{[item.time || "종일", sourceLabel(item), item.location].filter(Boolean).join(" · ")}</small></div>{scheduleAction(item)}</article>) : <p className="empty-line">이번 달에 등록된 일정이 없어요.</p>}
+            </div>}
+            <p className="calendar-footnote">Google 일정은 5분마다 확인합니다. 시간은 서울 기준입니다.{data.imports.find((item) => item.kind === "calendar") ? " · 최근 학사 PDF: " + data.imports.find((item) => item.kind === "calendar")?.fileName : ""}</p>
           </Widget>
 
           <Widget id="timetable" title="주간 시간표" icon={<BookOpen size={16} />} hidden={hidden} className="timetable-widget" action={<div className="header-actions"><input ref={timetableFileInput} className="sr-only" type="file" accept="application/pdf" onChange={(event) => void importPdf(event, "timetable")} /><button className="widget-add secondary" disabled={busy} onClick={() => timetableFileInput.current?.click()}><FileUp size={14} /> 시간표 PDF</button><button className="widget-add" onClick={() => openTimetable()}><Plus size={14} /> 수업</button></div>}>
@@ -506,8 +523,8 @@ export default function Home() {
         </div>
 
         <div className="column right-column">
-          <Widget id="schedule" title="저장된 다음 일정" icon={<CalendarDays size={16} />} hidden={hidden} action={<button className="widget-add" onClick={() => { setCalendarSource("saved"); setAddMode("schedule"); }}><Plus size={14} /> 추가</button>}>
-            {upcoming.length ? <div className="schedule-list">{upcoming.map((item) => <div className="schedule-item" key={item.id}><time>{item.date.slice(5).replace("-", ".")}<small>{item.time || "종일"}</small></time><span className={`schedule-line ${item.source === "pdf" ? "violet" : "blue"}`} /><div><strong>{item.title}</strong><small>{item.location || (item.source === "pdf" ? "PDF 학사일정" : "직접 입력")}</small></div><button className="inline-delete" onClick={() => void deleteResource("schedule", item.id)} aria-label={`${item.title} 삭제`}><Trash2 size={13} /></button></div>)}</div> : <button className="empty-card compact" onClick={() => setAddMode("schedule")}><Plus size={18} /><span>다가오는 일정을 추가하세요</span></button>}
+          <Widget id="schedule" title="다가오는 일정" icon={<CalendarDays size={16} />} hidden={hidden} action={<button className="widget-add" onClick={() => setAddMode("schedule")}><Plus size={14} /> 추가</button>}>
+            {upcoming.length ? <div className="schedule-list">{upcoming.map((item) => <div className="schedule-item" key={item.id}><time>{item.date.slice(5).replace("-", ".")}<small>{item.time || "종일"}</small></time><span className={`schedule-line ${sourceColor(item)}`} /><div><strong>{item.title}</strong><small>{[sourceLabel(item), item.location].filter(Boolean).join(" · ")}</small></div>{scheduleAction(item)}</div>)}</div> : <button className="empty-card compact" onClick={() => setAddMode("schedule")}><Plus size={18} /><span>다가오는 일정을 추가하세요</span></button>}
           </Widget>
 
           <Widget id="tasks" title="할 일" icon={<ListChecks size={16} />} hidden={hidden} className="tasks-widget">
@@ -521,7 +538,7 @@ export default function Home() {
 
       <Dialog open={addMode !== null} onOpenChange={(open) => { if (!open) { setAddMode(null); setPresetCell(null); } }}>
         <DialogContent className="manager-dialog">
-          <DialogHeader><DialogTitle>{addMode === "schedule" ? "대시보드 일정 추가" : addMode === "timetable" ? "시간표 입력" : "바로가기 추가"}</DialogTitle><DialogDescription>{addMode === "schedule" ? "저장된 일정 탭에 표시됩니다. Google 일정은 Google 캘린더 탭의 일정 추가를 이용해 주세요." : addMode === "timetable" ? "같은 요일과 교시를 다시 저장하면 내용이 바뀝니다." : "자주 쓰는 웹사이트를 데스크에 놓아두세요."}</DialogDescription></DialogHeader>
+          <DialogHeader><DialogTitle>{addMode === "schedule" ? "일정 지정" : addMode === "timetable" ? "시간표 입력" : "바로가기 추가"}</DialogTitle><DialogDescription>{addMode === "schedule" ? "대시보드에 저장하고 Google 일정과 같은 캘린더에 표시합니다." : addMode === "timetable" ? "같은 요일과 교시를 다시 저장하면 내용이 바뀝니다." : "자주 쓰는 웹사이트를 데스크에 놓아두세요."}</DialogDescription></DialogHeader>
           <form className="manager-form" onSubmit={handleAdd}>
             {addMode === "schedule" && <><label>날짜<input name="date" type="date" required defaultValue={selectedDate} /></label><label>일정명<input name="title" required maxLength={120} placeholder="예: 학부모 상담" /></label><div className="form-row"><label>시간<input name="time" type="time" /></label><label>장소<input name="location" maxLength={80} placeholder="선택 입력" /></label></div></>}
             {addMode === "timetable" && <><div className="form-row"><label>요일<select name="day" defaultValue={presetCell?.day ?? 0}>{schoolDays.map((day, index) => <option value={index} key={day}>{day}요일</option>)}</select></label><label>교시<select name="period" defaultValue={presetCell?.period ?? 1}>{Array.from({ length: 10 }, (_, i) => i + 1).map((period) => <option value={period} key={period}>{period}교시</option>)}</select></label></div><label>과목<input name="subject" required maxLength={30} placeholder="예: 국어" /></label><label>교실 또는 메모<input name="location" maxLength={50} placeholder="선택 입력" /></label></>}

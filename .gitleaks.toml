@@ -1,0 +1,8 @@
+title = "My Desk secret protection"
+[extend]
+useDefault = true
+[[rules]]
+id = "google-private-calendar"
+description = "Private Google Calendar subscription address"
+regex = '''https://calendar\.google\.com/calendar/ical/[^\s]+/private-[a-zA-Z0-9]+/[^\s]*'''
+keywords = ["private-"]

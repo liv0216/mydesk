@@ -380,7 +380,7 @@ export default function Home() {
     if (!file) return;
     setBusy(true);
     setError("");
-    setImportStatus(kind === "calendar" ? "PDF에서 날짜와 일정을 찾는 중…" : "PDF 시간표의 요일과 교시를 읽는 중…");
+    setImportStatus(kind === "calendar" ? "PDF 전체 페이지에서 한 해의 일정을 읽는 중…" : "PDF 시간표의 요일과 교시를 읽는 중…");
     try {
       const form = new FormData();
       form.append("file", file);
@@ -401,7 +401,7 @@ export default function Home() {
       }
       const result = await requestJson("/api/import", { method: "POST", body: form });
       await loadData();
-      setImportStatus(`${file.name}에서 ${result.imported}개 ${kind === "calendar" ? "일정" : "수업"}을 가져왔어요.`);
+      setImportStatus(kind === "calendar" ? `${result.startDate} ~ ${result.endDate} · 학사 일정 ${result.imported}개를 가져왔어요.` : `${file.name}에서 ${result.imported}개 수업을 가져왔어요.`);
     } catch (reason) {
       setImportStatus("");
       setError(reason instanceof Error ? reason.message : "PDF를 가져오지 못했어요.");
@@ -487,7 +487,7 @@ export default function Home() {
                 <button type="button" aria-pressed={calendarView === "month"} onClick={() => setCalendarView("month")}>월간</button>
                 <button type="button" aria-pressed={calendarView === "list"} onClick={() => setCalendarView("list")}>일정 목록</button>
               </div>
-              <div className="header-actions"><input ref={calendarFileInput} className="sr-only" type="file" accept="application/pdf" onChange={(event) => void importPdf(event, "calendar")} /><button className="widget-add secondary" disabled={busy} onClick={() => calendarFileInput.current?.click()}><FileUp size={14} /> 학사 PDF</button><button className="widget-add" onClick={() => setAddMode("schedule")}><Plus size={14} /> 일정 지정</button></div>
+              <div className="header-actions"><input ref={calendarFileInput} className="sr-only" type="file" accept="application/pdf" onChange={(event) => void importPdf(event, "calendar")} /><button className="widget-add secondary" disabled={busy} onClick={() => calendarFileInput.current?.click()}><FileUp size={14} /> 학사력 PDF</button><button className="widget-add" onClick={() => setAddMode("schedule")}><Plus size={14} /> 일정 지정</button></div>
             </div>
             <div className="calendar-toolbar">
               <div className="calendar-month-navigation"><button className="icon-button" onClick={() => { const date = new Date(calendarDays.year, calendarDays.month - 1, 1); setViewDate(date); setSelectedDate(dateKey(date)); }} aria-label="이전 달"><ChevronLeft size={17} /></button><strong>{calendarDays.year}년 {calendarDays.month + 1}월</strong><button className="icon-button" onClick={() => { const date = new Date(calendarDays.year, calendarDays.month + 1, 1); setViewDate(date); setSelectedDate(dateKey(date)); }} aria-label="다음 달"><ChevronRight size={17} /></button></div>
@@ -500,7 +500,7 @@ export default function Home() {
                 const key = dateKey(new Date(calendarDays.year, calendarDays.month, day));
                 const events = combinedSchedules.filter((item) => item.date === key);
                 const isToday = key === dateKey(new Date());
-                return <button key={key} aria-label={key + ", 일정 " + events.length + "개"} aria-pressed={selectedDate === key} className={(isToday ? "today " : "") + (selectedDate === key ? "selected" : "")} onClick={() => setSelectedDate(key)}><span className="date-number">{day}</span><span className="cell-events">{events.slice(0, 3).map((item) => <em className={item.source} title={sourceLabel(item) + " · " + item.title} key={item.id}>{item.title}</em>)}{events.length > 3 && <small className="calendar-more">+{events.length - 3}개 더</small>}</span></button>;
+                return <button key={key} aria-label={key + ", 일정 " + events.length + "개"} aria-pressed={selectedDate === key} className={(isToday ? "today " : "") + (selectedDate === key ? "selected" : "")} onClick={() => setSelectedDate(key)}><span className="date-number">{day}</span><span className="cell-events">{events.map((item) => <em className={item.source} title={sourceLabel(item) + " · " + item.title} key={item.id}>{item.title}</em>)}</span></button>;
               })}</div>
               <div className="selected-day-panel">
                 <div><strong>{selectedDate.replaceAll("-", ".")}</strong><button onClick={() => setAddMode("schedule")}><Plus size={13} /> 일정 지정</button></div>
@@ -509,7 +509,7 @@ export default function Home() {
             </> : <div className="calendar-agenda">
               {monthEvents.length ? monthEvents.map(item => <article key={item.id}><time dateTime={item.date}>{Number(item.date.slice(8))}<small>{week[new Date(item.date + "T00:00:00").getDay()]}</small></time><i className={"schedule-line " + sourceColor(item)} /><div><strong>{item.title}</strong><small>{[item.time || "종일", sourceLabel(item), item.location].filter(Boolean).join(" · ")}</small></div>{scheduleAction(item)}</article>) : <p className="empty-line">이번 달에 등록된 일정이 없어요.</p>}
             </div>}
-            <p className="calendar-footnote">Google 일정은 5분마다 확인합니다. 시간은 서울 기준입니다.{data.imports.find((item) => item.kind === "calendar") ? " · 최근 학사 PDF: " + data.imports.find((item) => item.kind === "calendar")?.fileName : ""}</p>
+            <p className="calendar-footnote">학사력 PDF의 전체 페이지를 읽습니다. 같은 파일명으로 다시 넣으면 해당 PDF 일정이 갱신됩니다. Google 일정은 5분마다 확인합니다. 시간은 서울 기준입니다.{data.imports.find((item) => item.kind === "calendar") ? " · 최근 학사 PDF: " + data.imports.find((item) => item.kind === "calendar")?.fileName : ""}</p>
           </Widget>
 
           <Widget id="timetable" title="주간 시간표" icon={<BookOpen size={16} />} hidden={hidden} className="timetable-widget" action={<div className="header-actions"><input ref={timetableFileInput} className="sr-only" type="file" accept="application/pdf" onChange={(event) => void importPdf(event, "timetable")} /><button className="widget-add secondary" disabled={busy} onClick={() => timetableFileInput.current?.click()}><FileUp size={14} /> 시간표 PDF</button><button className="widget-add" onClick={() => openTimetable()}><Plus size={14} /> 수업</button></div>}>

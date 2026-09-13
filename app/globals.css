@@ -568,3 +568,13 @@ footer span { font-weight: 900; letter-spacing: .13em; color: #536879; } footer 
 .calendar-footnote { margin: 10px 0 0; color: #7b8b96; font-size: 11px; line-height: 1.6; overflow-wrap: anywhere; }
 .unified-calendar-widget button:focus-visible, .unified-calendar-widget a:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
 @media (max-width: 470px) { .calendar-legend { gap: 12px; } .unified-calendar-widget .cell-events em { font-size: 10px; } }
+
+/* Compact, fully wrapped event titles; calendar rows grow with their content. */
+.unified-calendar-widget .dates { grid-template-columns: repeat(7, minmax(0, 1fr)); align-items: stretch; }
+.unified-calendar-widget .dates > button { min-width: 0; min-height: 84px; height: auto; overflow: visible; padding: 4px 2px; }
+.unified-calendar-widget .cell-events { min-width: 0; width: 100%; gap: 3px; }
+.unified-calendar-widget .cell-events em { font-size: .625rem; line-height: 1.45; padding: 2px 3px; white-space: normal; word-break: keep-all; overflow-wrap: anywhere; overflow: visible; text-overflow: clip; }
+@media (max-width: 470px) { .unified-calendar-widget .cell-events em { font-size: .5625rem; padding: 2px; } }
+
+.unified-calendar-widget .cell-events em { white-space: pre-line; }
+.unified-calendar-widget:not(.manually-sized) .widget-body { max-height: none; }

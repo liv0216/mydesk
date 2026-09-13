@@ -1,3 +1,4 @@
+import { parseAcademicCalendar } from "./academic-calendar";
 export type ExtractedAcademicEvent = { date: string; title: string };
 export type ExtractedTimetableEntry = { day: number; period: number; subject: string; location?: string };
 
@@ -40,31 +41,8 @@ function pageLines(page: PdfPage) {
   return rows.map((row) => row.sort((a, b) => a.x - b.x).map((item) => item.text).join(" "));
 }
 
-function validDate(year: number, month: number, day: number) {
-  const date = new Date(year, month - 1, day);
-  return date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day;
-}
-
 export async function extractAcademicEvents(file: File): Promise<ExtractedAcademicEvent[]> {
-  const pages = await readPdf(file);
-  const lines = pages.flatMap(pageLines);
-  const currentYear = new Date().getFullYear();
-  const candidates = lines.flatMap((line) => line.split(/(?=\s(?:20\d{2}\s*[.\-/년]\s*)?\d{1,2}\s*[.\-/월]\s*\d{1,2}\s*일?\s)/));
-  const found = new Map<string, ExtractedAcademicEvent>();
-  const pattern = /(?:(20\d{2})\s*[.\-/년]\s*)?(\d{1,2})\s*[.\-/월]\s*(\d{1,2})\s*일?\s*([^\n]{2,100})/g;
-
-  for (const candidate of candidates) {
-    for (const match of candidate.matchAll(pattern)) {
-      const year = Number(match[1] ?? currentYear);
-      const month = Number(match[2]);
-      const day = Number(match[3]);
-      const title = match[4].replace(/^(월|화|수|목|금|토|일)(요일)?\s*/, "").replace(/\s+(20\d{2}\s*[.\-/년].*)$/, "").replace(/\s+/g, " ").trim().slice(0, 120);
-      if (!validDate(year, month, day) || title.length < 2) continue;
-      const date = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-      found.set(`${date}-${title}`, { date, title });
-    }
-  }
-  return [...found.values()].slice(0, 250);
+  return parseAcademicCalendar(await readPdf(file), file.name);
 }
 
 function dayIndex(label: string) {

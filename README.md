@@ -20,7 +20,13 @@ Vercel의 무료 Neon 통합에서 Auth를 켜고 프로젝트를 연결합니�
 
 인증 장애를 확인할 때 Vercel 로그의 `Authentication request rejected`에서 동작·HTTP 상태·오류 코드만 확인합니다. 인증번호, 이메일, 쿠키, 토큰과 요청 본문을 로그에 추가하지 않습니다.
 
-Google Calendar의 비공개 iCal 주소는 각 사용자가 연결 설정에서 입력합니다. 서버에 암호화하여 저장하고 브라우저 응답에 주소를 돌려주지 않습니다. Google 일정 편집은 Google Calendar에서 진행합니다. 세션 비밀값을 바꾸면 기존 캘린더 암호화 값도 바뀌므로 사용자에게 재연결이 필요합니다.
+Google 계정을 처음 한 번 연결하면 다음 로그인에서도 캘린더를 자동으로 불러옵니다. 로그인한 이메일을 Google 계정 선택의 힌트로 사용하며, Google 연결 계정과 데스크 소유권은 별도로 검증합니다. Google 일정 편집은 Google Calendar에서 진행합니다. 토큰은 서버에 암호화하여 저장하며 브라우저 응답에 반환하지 않습니다. 기존 비공개 iCal 방식은 고급 설정에서 사용할 수 있습니다. 세션 비밀값을 바꾸면 기존 캘린더 암호화 값도 바뀌므로 사용자에게 재연결이 필요합니다.
+
+## Google 계정 연결 설정
+
+Google Cloud에서 Calendar API를 활성화하고 외부 OAuth 웹 애플리케이션을 만듭니다. 승인된 리디렉션 URI를 `https://내-도메인/api/google-calendar/callback`으로 정확히 등록합니다. `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`를 Vercel 서버 환경변수에 설정하고 `scripts/google-oauth-schema.sql`을 적용합니다. 클라이언트 비밀값은 민감한 환경변수로 저장하고 Git에 넣지 않습니다.
+
+요청 범위는 `openid`, `email`, `calendar.events.readonly`, `calendar.calendarlist.readonly`입니다. 캘린더 목록과 일정의 읽기 권한만 사용합니다. Google 인증 플랫폼의 테스트 모드에서는 등록한 테스트 사용자만 연결할 수 있고 갱신 토큰의 수명이 제한될 수 있습니다. 일반 사용자에게 제공하려면 프로덕션 게시 및 Google이 요구하는 앱 검증을 완료해야 합니다. 공개 소개는 `/about`, 개인정보 처리 안내는 `/privacy`에 있습니다. 무료 사용 조건에 맞게 결제 계정 없이 운영하고 Google API 할당량을 확인합니다.
 
 ## 학사력 PDF
 

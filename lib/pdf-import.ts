@@ -2,15 +2,18 @@ import { parseAcademicCalendar } from "./academic-calendar";
 export type ExtractedAcademicEvent = { date: string; title: string };
 export type ExtractedTimetableEntry = { day: number; period: number; subject: string; location?: string };
 
-type PdfText = { text: string; x: number; y: number; width: number; hasEOL: boolean };
+type PdfText = { text: string; x: number; y: number; width: number; height: number; hasEOL: boolean };
 type PdfPage = PdfText[];
+export type PdfProgress = (page: number, total: number) => void;
 
-async function readPdf(file: File): Promise<PdfPage[]> {
+async function readPdf(file: File, onProgress?: PdfProgress): Promise<PdfPage[]> {
   const pdfjs = await import("pdfjs-dist");
   pdfjs.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url).toString();
-  const document = await pdfjs.getDocument({ data: await file.arrayBuffer() }).promise;
+  const loadingTask = pdfjs.getDocument({ data: await file.arrayBuffer() });
+  const document = await loadingTask.promise;
   const pages: PdfPage[] = [];
 
+  try {
   for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber += 1) {
     const page = await document.getPage(pageNumber);
     const content = await page.getTextContent();
@@ -22,12 +25,16 @@ async function readPdf(file: File): Promise<PdfPage[]> {
         x: item.transform[4],
         y: item.transform[5],
         width: item.width,
+        height: item.height,
         hasEOL: item.hasEOL,
       });
     }
     pages.push(items);
+    page.cleanup();
+    onProgress?.(pageNumber, document.numPages);
   }
   return pages;
+  } finally { await loadingTask.destroy(); }
 }
 
 function pageLines(page: PdfPage) {
@@ -42,6 +49,13 @@ function pageLines(page: PdfPage) {
 
 export async function extractAcademicEvents(file: File): Promise<ExtractedAcademicEvent[]> {
   return parseAcademicCalendar(await readPdf(file), file.name);
+}
+
+export async function inspectAcademicPdf(file: File, onProgress?: PdfProgress) {
+  const pages = await readPdf(file, onProgress);
+  const events = parseAcademicCalendar(pages, file.name);
+  const months = [...new Set(events.map(event => event.date.slice(0, 7)))].sort();
+  return { events, months, pageCount: pages.length, emptyPages: pages.flatMap((page, index) => page.length ? [] : [index + 1]) };
 }
 
 function dayIndex(label: string) {

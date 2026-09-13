@@ -27,10 +27,14 @@ const tokenSource = /(?<!\d)(?:(20\d{2})\s*[년./-]\s*)?(\d{1,2})\s*[월./-]\s*(
 function datedLine(input: string, context: Context): AcademicEvent[] {
   const text = clean(input), tokens = [...text.matchAll(new RegExp(tokenSource, "g"))];
   if (!tokens.length) {
-    const short = context.month && text.match(/^\s*(\d{1,2})(?:일)?(?:\s*[（(]\s*[월화수목금토일](?:요일)?\s*[）)])?\s+(.+)$/);
-    if (!short) return [];
-    const date = iso(inferredYear(context.month!, context), context.month!, Number(short[1]));
-    return date && /[가-힣A-Za-z]/.test(short[2]) ? [{date, title: clean(short[2])}] : [];
+    const short = context.month && text.match(/^\s*(\d{1,2})(?:일)?(?:\s*[（(]\s*[월화수목금토일](?:요일)?\s*[）)])?(?:\s*[~〜～–—-]\s*(\d{1,2})(?:일)?(?:\s*[（(]\s*[월화수목금토일](?:요일)?\s*[）)])?)?\s+(.+)$/);
+    if (!short || /^(?:교시|학년|명|시간|쪽|페이지)(?:\s|$)/.test(short[3])) return [];
+    const start = iso(inferredYear(context.month!, context), context.month!, Number(short[1]));
+    const end = iso(inferredYear(context.month!, context), context.month!, Number(short[2] ?? short[1]));
+    if (!start || !end || end < start || !/[가-힣A-Za-z]/.test(short[3])) return [];
+    const events: AcademicEvent[] = [];
+    for (let d = Date.parse(start); d <= Date.parse(end); d += dayMs) events.push({date:new Date(d).toISOString().slice(0,10), title:clean(short[3])});
+    return events;
   }
   const out: AcademicEvent[] = [];
   let consumed = 0;
@@ -101,6 +105,80 @@ function gridEvents(page: PdfTextItem[], context: Context): {events: AcademicEve
   headers.forEach(item=>used.add(item));months.forEach(item=>used.add(item));
   return {events,used};
 }
+// Conventional month pages use a heading above their weekday grid. Keep this
+// layout separate from the continuous school-week table supported above.
+function monthGridEvents(page: PdfTextItem[], context: Context): {events: AcademicEvent[]; used: Set<PdfTextItem>} {
+  const used = new Set<PdfTextItem>(), events: AcademicEvent[] = [];
+  const groups: PdfTextItem[][] = [];
+  for (const row of textRows(page)) {
+    let group: PdfTextItem[] = [];
+    for (const item of row.filter(item => /^[월화수목금토일](?:요일)?$/.test(item.text))) {
+      if (group.some(previous => previous.text[0] === item.text[0])) {
+        if (group.length >= 5) groups.push(group);
+        group = [];
+      }
+      group.push(item);
+    }
+    if (group.length >= 5) groups.push(group);
+  }
+  const labels = page.flatMap(item => {
+    const match = clean(item.text).match(/^(?:(20\d{2})\s*년\s*)?([1-9]|1[0-2])\s*월(?:\s*(?:달력|학사일정))?$/);
+    return match ? [{item, year: match[1] ? Number(match[1]) : null, month: Number(match[2])}] : [];
+  });
+  const median = (values: number[]) => [...values].sort((a,b) => a-b)[Math.floor(values.length/2)];
+  for (const headers of groups) {
+    const centers = headers.map(item => item.x + item.width/2);
+    const gap = median(centers.slice(1).map((center,i) => center-centers[i]));
+    const bounds = [centers[0]-gap/2-4, ...centers.slice(1).map((center,i) => (center+centers[i])/2), centers.at(-1)!+gap/2+4];
+    const inGrid = (item: PdfTextItem) => item.x+item.width/2 >= bounds[0] && item.x+item.width/2 < bounds.at(-1)!;
+    const column = (item: PdfTextItem) => bounds.findIndex((left,i) => i<headers.length && item.x+item.width/2>=left && item.x+item.width/2<bounds[i+1]);
+    const heading = labels.filter(label => inGrid(label.item) && label.item.y>headers[0].y && label.item.y-headers[0].y<90).sort((a,b) => a.item.y-b.item.y)[0];
+    if (!heading) continue;
+    const nextHeaders = groups.filter(group => group[0].y<headers[0].y && group.some(inGrid)).map(group => group[0].y+3);
+    const nextTitles = labels.filter(label => inGrid(label.item) && label.item.y<headers[0].y).map(label => label.item.y+3);
+    const lowerBound = Math.max(-Infinity, ...nextHeaders, ...nextTitles);
+    let anchors = page.filter(item => inGrid(item) && item.y<headers[0].y-4 && item.y>lowerBound && /^(?:[1-9]|[12]\d|3[01])$/.test(item.text));
+    const maxHeight = Math.max(0,...anchors.map(item => item.height ?? 0));
+    anchors = anchors.filter(item => !item.height || item.height>=maxHeight*.85);
+    const rows = textRows(anchors);
+    if (anchors.length<5 || rows.length<2) continue;
+    const rowGap = median(rows.slice(1).map((row,i) => rows[i][0].y-row[0].y));
+    const anchorSet = new Set(anchors);
+    let month = heading.month, year = heading.year ?? inferredYear(month,context), previous = 0;
+    if (Number(rows[0][0].text)>20 && rows[0].some(item => Number(item.text)<10)) {
+      if (--month===0) { month=12; year--; }
+    }
+    for (let rowIndex=0; rowIndex<rows.length; rowIndex++) {
+      const row = rows[rowIndex];
+      const bottom = Math.max(lowerBound, (rows[rowIndex+1]?.[0].y ?? row[0].y-rowGap)+2);
+      for (const anchor of row) {
+        const day=Number(anchor.text);
+        if (day<previous) { if (++month===13) { month=1; year++; } }
+        previous=day;
+        const date=iso(year,month,day), col=column(anchor);
+        // A number belongs to a date cell only when the weekday agrees.
+        if (!date || '일월화수목금토'[new Date(date+'T00:00:00Z').getUTCDay()]!==headers[col]?.text[0]) continue;
+        const contents=page.filter(item => !anchorSet.has(item) && column(item)===col && item.y<=anchor.y+2 && item.y>bottom);
+        used.add(anchor); contents.forEach(item => used.add(item));
+        const lines=textRows(contents).map(line => clean(line.map(item => item.text).join(' ')));
+        const chunks: string[]=[];
+        for (const line of lines) {
+          if (/^[（(]/.test(line) && chunks.length) chunks[chunks.length-1]+=' '+line;
+          else chunks.push(line);
+        }
+        const pending: string[]=[];
+        for (const chunk of chunks) {
+          const dated=datedLine(chunk,{year,month,academic:false});
+          if (dated.length) events.push(...dated);
+          else if (/[가-힣A-Za-z]/.test(chunk)) pending.push(chunk);
+        }
+        if (pending.length) events.push({date,title:pending.join('\n')});
+      }
+    }
+    headers.forEach(item => used.add(item)); used.add(heading.item);
+  }
+  return {events,used};
+}
 export function parseAcademicCalendar(pages: PdfTextItem[][], filename="", fallbackYear=new Date().getFullYear()): AcademicEvent[] {
   const context=contextFor(pages,filename,fallbackYear),found=new Map<string,AcademicEvent>();
   const add=(event:AcademicEvent)=>{
@@ -110,14 +188,20 @@ export function parseAcademicCalendar(pages: PdfTextItem[][], filename="", fallb
     if(found.size>MAX_ACADEMIC_EVENTS)throw new Error("일정이 5,000개를 넘어요. PDF를 나누어 가져와 주세요.");
   };
   for(const page of pages) {
-    const grid=gridEvents(page,context);grid.events.forEach(add);
+    const monthly=monthGridEvents(page,context);monthly.events.forEach(add);
+    const grid=gridEvents(page.filter(item=>!monthly.used.has(item)),context);grid.events.forEach(add);
+    monthly.used.forEach(item=>grid.used.add(item));
     let currentMonth:number|undefined;
+    let currentContext=context;
     for(const row of textRows(page.filter(item=>!grid.used.has(item)))) {
       const line=clean(row.map(item=>item.text).join(" "));
       const heading=line.match(/^(?:(20\d{2})\s*년\s*)?(\d{1,2})\s*월(?:\s|$)/);
-      if(heading)currentMonth=Number(heading[2]);
+      if(heading) {
+        currentMonth=Number(heading[2]);
+        if(heading[1])currentContext={year:Number(heading[1]),academic:false};
+      }
       if(grid.used.size && row.every(item=>item.x<Math.min(...page.filter(item=>grid.used.has(item)).map(item=>item.x))))continue;
-      datedLine(line,{...context,month:currentMonth}).forEach(add);
+      datedLine(line,{...currentContext,month:currentMonth}).forEach(add);
     }
   }
   return [...found.values()].sort((a,b)=>a.date.localeCompare(b.date)||a.title.localeCompare(b.title,"ko"));

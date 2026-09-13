@@ -2,7 +2,15 @@ import { requireUser, apiError, privateHeaders, ApiError } from "@/lib/api-auth"
 import { database, initializeDesk } from "@/lib/desk-store";
 import { encryptCalendar, decryptCalendar } from "@/lib/calendar-crypto";
 import { parseGoogleCalendar, seoulDate } from "@/lib/google-calendar-feed";
+import { fetchGoogleCalendarEvents, GoogleCalendarApiError } from "@/lib/google-calendar-api";
+import { getOAuthConnection, disconnectOAuthConnection } from "@/lib/google-oauth-store";
+import { GoogleOAuthError } from "@/lib/google-oauth";
 export const dynamic = "force-dynamic";
+
+function oauthAvailable() { return Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET && process.env.GOOGLE_REDIRECT_URI); }
+function disconnected(needsReconnect = false) {
+  return Response.json({ connected: false, connectionType: null, accountEmail: null, oauthAvailable: oauthAvailable(), needsReconnect, events: [], upcoming: [], updatedAt: null, stale: false }, { headers: privateHeaders });
+}
 type Feed = { url: string; text: string; updatedAt: string };
 const cache=new Map<string,Feed>();
 async function readFeed(url: string) {
@@ -32,21 +40,39 @@ function keepCache(id: string, feed: Feed) {
 export async function GET(request: Request) {
  try {
   const user=await requireUser(request); await initializeDesk(user);
-  const [row]=await database().query('SELECT google_cipher FROM mydesk_documents WHERE owner_id=$1',[user.id]);
-  if(!row.google_cipher)return Response.json({connected:false,events:[],upcoming:[],updatedAt:null,stale:false},{headers:privateHeaders});
-  const calendarUrl=decryptCalendar(row.google_cipher,process.env.NEON_AUTH_COOKIE_SECRET!);
   const url=new URL(request.url);const month=url.searchParams.get('month')||seoulDate(new Date()).slice(0,7);
   if(!/^(19|20)\d{2}-(0[1-9]|1[0-2])$/.test(month))throw new ApiError("월을 확인해 주세요.");
   const [year,number]=month.split('-').map(Number);const start=month+'-01',end=new Date(Date.UTC(year,number,1)).toISOString().slice(0,10);
   const today=seoulDate(new Date()),upcomingEnd=new Date(Date.parse(today+'T00:00:00Z')+90*86400000).toISOString().slice(0,10);
-  const ranges=[{start,end},{start:today,end:upcomingEnd}];let feed=cache.get(user.id);let stale=false;
+  const ranges=[{start,end},{start:today,end:upcomingEnd}];
+  let connection = await getOAuthConnection(user.id);
+  if (connection) {
+    let events;
+    try { events = await fetchGoogleCalendarEvents(connection.accessToken, ranges); }
+    catch (error) {
+      if (error instanceof GoogleCalendarApiError && error.status === 401) {
+        connection = await getOAuthConnection(user.id, true);
+        if (!connection) return disconnected(true);
+        events = await fetchGoogleCalendarEvents(connection.accessToken, ranges);
+      } else throw error;
+    }
+    return Response.json({connected:true,connectionType:"oauth",accountEmail:connection.googleEmail,oauthAvailable:oauthAvailable(),needsReconnect:false,events:events.filter(item=>item.date>=start&&item.date<end),upcoming:events.filter(item=>item.date>=today&&item.date<upcomingEnd),updatedAt:new Date().toISOString(),stale:false},{headers:privateHeaders});
+  }
+  const [row]=await database().query('SELECT google_cipher FROM mydesk_documents WHERE owner_id=$1',[user.id]);
+  if(!row.google_cipher)return disconnected();
+  const calendarUrl=decryptCalendar(row.google_cipher,process.env.NEON_AUTH_COOKIE_SECRET!);
+  let feed=cache.get(user.id);let stale=false;
   if(!feed||feed.url!==calendarUrl||Date.now()-Date.parse(feed.updatedAt)>120000||url.searchParams.get('refresh')==='1') {
     try { const text=await readFeed(calendarUrl);parseGoogleCalendar(text,ranges);feed={url:calendarUrl,text,updatedAt:new Date().toISOString()};keepCache(user.id,feed); }
     catch { if(!feed||feed.url!==calendarUrl)throw new ApiError("Google 일정을 불러오지 못했어요. 잠시 후 다시 시도해 주세요.",502);stale=true; }
   }
   const events=parseGoogleCalendar(feed.text,ranges);
-  return Response.json({connected:true,events:events.filter(item=>item.date>=start&&item.date<end),upcoming:events.filter(item=>item.date>=today&&item.date<upcomingEnd),updatedAt:feed.updatedAt,stale},{headers:privateHeaders});
- } catch(error) { return apiError(error); }
+  return Response.json({connected:true,connectionType:"ical",accountEmail:null,oauthAvailable:oauthAvailable(),needsReconnect:false,events:events.filter(item=>item.date>=start&&item.date<end),upcoming:events.filter(item=>item.date>=today&&item.date<upcomingEnd),updatedAt:feed.updatedAt,stale},{headers:privateHeaders});
+ } catch(error) {
+   if(error instanceof GoogleOAuthError && error.reason === "reconnect_required") return disconnected(true);
+   if(error instanceof GoogleCalendarApiError && [401,403].includes(error.status)) return apiError(new ApiError("Google 캘린더 읽기 권한을 확인해 주세요. Google 계정을 다시 연결하면 해결할 수 있어요.",502));
+   return apiError(error);
+ }
 }
 export async function PUT(request: Request) {
  try {
@@ -60,6 +86,6 @@ export async function PUT(request: Request) {
  } catch(error) { return apiError(error); }
 }
 export async function DELETE(request: Request) {
- try { const user=await requireUser(request);await database().query('UPDATE mydesk_documents SET google_cipher=NULL,updated_at=now() WHERE owner_id=$1',[user.id]);cache.delete(user.id);return Response.json({connected:false},{headers:privateHeaders}); }
+ try { const user=await requireUser(request);await disconnectOAuthConnection(user.id);await database().query('UPDATE mydesk_documents SET google_cipher=NULL,updated_at=now() WHERE owner_id=$1',[user.id]);cache.delete(user.id);return Response.json({connected:false},{headers:privateHeaders}); }
  catch(error) { return apiError(error); }
 }

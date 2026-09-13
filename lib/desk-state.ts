@@ -44,6 +44,8 @@ export function importDesk(input: DeskState, body: Record<string,unknown>): Desk
     if(!Array.isArray(body.events)||!body.events.length||body.events.length>5000)throw new InputError("일정 개수를 확인해 주세요.");
     let id=nextId(state.schedules); for(const event of body.events){if(!event||typeof event!=='object')throw new InputError("일정 내용을 확인해 주세요.");state.schedules.push({id:id++,date:date(event.date),title:text(event.title,1000,true),time:null,location:null,source:'pdf',sourceImportId:imported.id,sourceFileName:fileName});}
     imported.detectedCount=body.events.length;
+    const dates=state.schedules.filter(row=>row.sourceImportId===imported.id).map(row=>String(row.date)).sort();
+    Object.assign(imported,{firstDate:dates[0],lastDate:dates.at(-1),months:[...new Set(dates.map(value=>value.slice(0,7)))].sort()});
     if(state.schedules.length>5000)throw new InputError("일정 저장 한도에 도달했어요.");
   } else {
     if(!Array.isArray(body.entries)||!body.entries.length||body.entries.length>50)throw new InputError("시간표를 확인해 주세요.");

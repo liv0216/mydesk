@@ -94,7 +94,7 @@ export default function SignIn() {
         setOtp(normalizedOtp);
         const result = await authClient.signIn.emailOtp({ email: normalizedEmail, otp: normalizedOtp });
         if (result.error) throw result.error;
-        forgetRequest(normalizedEmail); window.location.assign('/'); navigating = true;
+        forgetRequest(normalizedEmail); window.location.assign('/?welcome=1'); navigating = true;
       }
     } catch (reason) {
       const issue = signInIssue(reason, action); setError(issue.message);

@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
+  verification: { google: "-Vqg30uiKmqcbgYTw_E_ZgvWXzw-wIXUTK1khp5bGiA" },
   title: "마이 데스크 대시보드",
   description: "시간, 날씨, 일정, 시간표와 할 일을 한눈에 보는 개인 업무 대시보드",
   icons: {

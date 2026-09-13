@@ -34,13 +34,13 @@ import {
 import { authClient } from "@/lib/auth/client";
 import { Switch } from "@/components/ui/switch";
 import { GoogleCalendarStatus, useGoogleCalendar } from "@/components/google-calendar";
-import { extractAcademicEvents, extractTimetableEntries } from "@/lib/pdf-import";
+import { inspectAcademicPdf, extractTimetableEntries } from "@/lib/pdf-import";
 
 type Task = { id: number; text: string; tag: string; done: number | boolean };
 type Shortcut = { id: number; label: string; url: string; color: string };
 type Schedule = { id: number | string; date: string; title: string; time: string | null; location: string | null; source: string; htmlUrl?: string };
 type TimetableEntry = { id: number; day: number; period: number; subject: string; location: string | null };
-type AcademicImport = { id: number; fileName: string; kind: "calendar" | "timetable"; detectedCount: number; createdAt: number };
+type AcademicImport = { id: number; fileName: string; kind: "calendar" | "timetable"; detectedCount: number; createdAt: number; firstDate?: string; lastDate?: string; months?: string[] };
 type ClassStatus = { total: number; attendance: number; absence: number; earlyDismissal: number; tardy: number };
 type DashboardData = { tasks: Task[]; shortcuts: Shortcut[]; schedules: Schedule[]; timetable: TimetableEntry[]; imports: AcademicImport[]; classStatus: ClassStatus };
 type AddMode = "schedule" | "timetable" | "shortcut" | null;
@@ -384,14 +384,13 @@ export default function Dashboard({ user }: { user: { id: string; email: string;
     setImportStatus(kind === "calendar" ? "PDF 전체 페이지에서 한 해의 일정을 읽는 중…" : "PDF 시간표의 요일과 교시를 읽는 중…");
     try {
       const payload: Record<string, unknown> = { fileName: file.name, kind };
+      let calendarReport: Awaited<ReturnType<typeof inspectAcademicPdf>> | null = null;
       if (kind === "calendar") {
-        const events = await extractAcademicEvents(file);
+        calendarReport = await inspectAcademicPdf(file, (page, total) => setImportStatus(`학사력 PDF ${page}/${total}페이지를 읽는 중…`));
+        const { events } = calendarReport;
         if (!events.length) throw new Error("일정을 찾지 못했어요. 스캔 이미지 PDF는 OCR 후 다시 시도하거나 일정을 직접 추가해 주세요.");
         setImportStatus(`${events.length}개 일정을 캘린더에 저장하는 중…`);
         payload.events = events;
-        const first = new Date(`${events[0].date}T00:00:00`);
-        setViewDate(first);
-        setSelectedDate(events[0].date);
       } else {
         const entries = await extractTimetableEntries(file);
         if (!entries.length) throw new Error("시간표 표를 찾지 못했어요. 요일과 교시가 텍스트로 포함된 PDF인지 확인해 주세요.");
@@ -400,7 +399,14 @@ export default function Dashboard({ user }: { user: { id: string; email: string;
       }
       const result = await requestJson("/api/import", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
       await loadData();
-      setImportStatus(`${file.name}에서 ${result.imported}개 ${kind === "calendar" ? "일정" : "수업"}을 가져왔어요.`);
+      if (calendarReport) {
+        const events = calendarReport.events;
+        const currentMonth = dateKey(viewDate).slice(0, 7);
+        const visible = events.find(item => item.date.startsWith(currentMonth)) || events[0];
+        setViewDate(new Date(`${visible.date}T00:00:00`)); setSelectedDate(visible.date);
+        const skipped = calendarReport.emptyPages.length ? ` ${calendarReport.emptyPages.join(", ")}페이지는 읽을 수 있는 텍스트가 없어 포함되지 않았어요. 스캔 페이지라면 OCR이 필요해요.` : "";
+        setImportStatus(`${file.name} 전체 ${calendarReport.pageCount}페이지에서 ${calendarReport.months.length}개월 · ${result.imported}개 일정을 저장했어요 (${events[0].date} ~ ${events.at(-1)!.date}).${skipped}`);
+      } else setImportStatus(`${file.name}에서 ${result.imported}개 수업을 가져왔어요.`);
     } catch (reason) {
       setImportStatus("");
       setError(reason instanceof Error ? reason.message : "PDF를 가져오지 못했어요.");
@@ -508,7 +514,7 @@ export default function Dashboard({ user }: { user: { id: string; email: string;
             </> : <div className="calendar-agenda">
               {monthEvents.length ? monthEvents.map(item => <article key={item.id}><time dateTime={item.date}>{Number(item.date.slice(8))}<small>{week[new Date(item.date + "T00:00:00").getDay()]}</small></time><i className={"schedule-line " + sourceColor(item)} /><div><strong>{item.title}</strong><small>{[item.time || "종일", sourceLabel(item), item.location].filter(Boolean).join(" · ")}</small></div>{scheduleAction(item)}</article>) : <p className="empty-line">이번 달에 등록된 일정이 없어요.</p>}
             </div>}
-            <p className="calendar-footnote">Google 일정은 5분마다 확인합니다. 시간은 서울 기준입니다.{data.imports.find((item) => item.kind === "calendar") ? " · 최근 학사 PDF: " + data.imports.find((item) => item.kind === "calendar")?.fileName : ""}</p>
+            <p className="calendar-footnote">Google 일정은 5분마다 확인합니다. 시간은 서울 기준입니다.{data.imports.find((item) => item.kind === "calendar") ? " · 최근 학사 PDF: " + data.imports.find((item) => item.kind === "calendar")?.fileName + " · " + data.imports.find((item) => item.kind === "calendar")?.detectedCount + "개 저장" : ""}</p>
           </Widget>
 
           <Widget id="timetable" title="주간 시간표" icon={<BookOpen size={16} />} hidden={hidden} className="timetable-widget" action={<div className="header-actions"><input ref={timetableFileInput} className="sr-only" type="file" accept="application/pdf" onChange={(event) => void importPdf(event, "timetable")} /><button className="widget-add secondary" disabled={busy} onClick={() => timetableFileInput.current?.click()}><FileUp size={14} /> 시간표 PDF</button><button className="widget-add" onClick={() => openTimetable()}><Plus size={14} /> 수업</button></div>}>

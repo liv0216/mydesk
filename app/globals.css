@@ -608,3 +608,14 @@ footer span { font-weight: 900; letter-spacing: .13em; color: #536879; } footer 
 .sign-in-card button:disabled { opacity: .55; cursor: not-allowed; }
 .sign-in-card input:disabled { background: #f3f6f8; color: #607585; }
 .sign-in-card button:focus-visible, .sign-in-card input:focus-visible { outline: 2px solid #2c79e9; outline-offset: 3px; }
+.info-page { min-height: 100vh; padding: 40px 20px; background: #f3f7f9; color: #20394d; }
+.info-page article { max-width: 760px; margin: 0 auto; padding: 40px; border: 1px solid #dce7ee; border-radius: 22px; background: #fff; }
+.info-page h1 { font-size: 30px; line-height: 1.4; margin: 15px 0 25px; }
+.info-page h2 { font-size: 19px; margin: 28px 0 10px; }
+.info-page p { line-height: 1.85; font-size: 15px; }
+.info-page a { color: #2367b4; text-decoration: underline; text-underline-offset: 3px; }
+.info-page footer { display: flex; gap: 22px; margin-top: 32px; padding-top: 20px; border-top: 1px solid #dce7ee; font-size: 13px; }
+.info-page .info-primary { display: inline-block; padding: 11px 18px; background: #2c79e9; color: white; border-radius: 9px; text-decoration: none; }
+@media(max-width:560px) { .info-page { padding: 18px 12px; } .info-page article { padding: 25px; } }
+
+.calendar-welcome,.calendar-notice{margin-top:8px}.calendar-advanced-settings summary{font-size:12px;cursor:pointer;padding:8px 0}.calendar-advanced-settings .manager-form{margin-top:10px}.manager-dialog{max-height:85dvh;overflow-y:auto}

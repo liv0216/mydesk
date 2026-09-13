@@ -577,7 +577,14 @@ footer span { font-weight: 900; letter-spacing: .13em; color: #536879; } footer 
 @media (max-width: 470px) { .unified-calendar-widget .cell-events em { font-size: .5625rem; padding: 2px; } }
 
 .unified-calendar-widget .cell-events em { white-space: pre-line; }
-.unified-calendar-widget:not(.manually-sized) .widget-body { max-height: none; }
+/* Event changes stay inside their cards, keeping nearby and moved widgets in place.
+   Inline dimensions from the resize handle still override these default heights. */
+.unified-calendar-widget, .schedule-widget { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+.unified-calendar-widget { height: clamp(620px, 80vh, 820px); }
+.schedule-widget { height: 300px; }
+.unified-calendar-widget .widget-header, .schedule-widget .widget-header { flex: 0 0 auto; }
+.unified-calendar-widget .widget-body, .schedule-widget .widget-body { flex: 1 1 auto; max-height: none; overflow-y: auto; scrollbar-gutter: stable; }
+.unified-calendar-widget .widget-body:focus-visible, .schedule-widget .widget-body:focus-visible { outline: 2px solid var(--blue); outline-offset: -2px; border-radius: 4px; }
 
 .sign-in-screen { min-height:100vh; display:grid;place-items:center;padding:24px;background:radial-gradient(ellipse at top left,#ddeefa,transparent 60%),#f3f7f9; }
 .sign-in-card { width:min(100%,420px);padding:36px;background:white;border:1px solid #dce7ee;border-radius:22px;box-shadow:0 18px 60px #27486512; }

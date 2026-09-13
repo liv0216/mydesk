@@ -193,7 +193,7 @@ function Widget({ id, title, icon, hidden, className = "", action, children }: {
           ><Move size={16} /></button>
         </div>
       </header>
-      <div className="widget-body">{children}</div>
+      <div className="widget-body" tabIndex={id === "calendar" || id === "schedule" ? 0 : undefined}>{children}</div>
       <button
         className="resize-handle"
         aria-label={`${title} 크기 조정`}
@@ -555,7 +555,7 @@ export default function Dashboard({ user }: { user: { id: string; email: string;
         </div>
 
         <div className="column right-column">
-          <Widget id="schedule" title="다가오는 일정" icon={<CalendarDays size={16} />} hidden={hidden} action={<button className="widget-add" onClick={() => setAddMode("schedule")}><Plus size={14} /> 추가</button>}>
+          <Widget id="schedule" title="다가오는 일정" icon={<CalendarDays size={16} />} hidden={hidden} className="schedule-widget" action={<button className="widget-add" onClick={() => setAddMode("schedule")}><Plus size={14} /> 추가</button>}>
             {upcoming.length ? <div className="schedule-list">{upcoming.map((item) => <div className="schedule-item" key={item.id}><time>{item.date.slice(5).replace("-", ".")}<small>{item.time || "종일"}</small></time><span className={`schedule-line ${sourceColor(item)}`} /><div><strong>{item.title}</strong><small>{[sourceLabel(item), item.location].filter(Boolean).join(" · ")}</small></div>{scheduleAction(item)}</div>)}</div> : <button className="empty-card compact" onClick={() => setAddMode("schedule")}><Plus size={18} /><span>다가오는 일정을 추가하세요</span></button>}
           </Widget>
 

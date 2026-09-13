@@ -1,0 +1,4 @@
+import { createHash, randomBytes, createCipheriv, createDecipheriv } from "node:crypto";
+function key(secret: string) { if(secret.length<32)throw new Error("Missing calendar encryption key"); return createHash("sha256").update("mydesk-calendar-v1\0"+secret).digest(); }
+export function encryptCalendar(value: string, secret: string) { const iv=randomBytes(12); const cipher=createCipheriv('aes-256-gcm',key(secret),iv); const encrypted=Buffer.concat([cipher.update(value,'utf8'),cipher.final()]); return Buffer.concat([iv,cipher.getAuthTag(),encrypted]).toString('base64'); }
+export function decryptCalendar(value: string, secret: string) { const bytes=Buffer.from(value,'base64');if(bytes.length<29)throw new Error("Invalid encrypted calendar");const decipher=createDecipheriv('aes-256-gcm',key(secret),bytes.subarray(0,12));decipher.setAuthTag(bytes.subarray(12,28));return Buffer.concat([decipher.update(bytes.subarray(28)),decipher.final()]).toString('utf8'); }

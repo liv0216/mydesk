@@ -26,6 +26,7 @@ function wallTimestamp(value: ICAL.Time, zone: string) {
 }
 
 export function parseGoogleCalendar(text: string, ranges: DateRange[]): GoogleSchedule[] {
+  ICAL.TimezoneService.reset();
   if (!text.trimStart().startsWith("BEGIN:VCALENDAR")) throw new Error("Invalid calendar feed");
   const calendar = new ICAL.Component(ICAL.parse(text));
   for (const zone of calendar.getAllSubcomponents("vtimezone")) ICAL.TimezoneService.register(zone);
@@ -58,7 +59,7 @@ export function parseGoogleCalendar(text: string, ranges: DateRange[]): GoogleSc
       const clippedEnd = exclusiveEnd < range.end ? exclusiveEnd : range.end;
       for (let date = clippedStart; date < clippedEnd; date = nextDay(date)) {
         const id = `google:${event.uid}:${recurrence}:${date}`;
-        rows.set(id, { id, date, title: String(event.summary || "제목 없는 일정"), time: isDate ? null : date === first ? timeFormatter.format(new Date(startTime)) : "계속", location: event.location ? String(event.location) : null, source: "google", htmlUrl: `https://calendar.google.com/calendar/u/0/r/day/${date.replaceAll("-", "/")}?authuser=liv0216%40gmail.com` });
+        rows.set(id, { id, date, title: String(event.summary || "제목 없는 일정"), time: isDate ? null : date === first ? timeFormatter.format(new Date(startTime)) : "계속", location: event.location ? String(event.location) : null, source: "google", htmlUrl: `https://calendar.google.com/calendar/u/0/r/day/${date.replaceAll("-", "/")}` });
         if (rows.size > 10000) throw new Error("Calendar range too large");
       }
     }

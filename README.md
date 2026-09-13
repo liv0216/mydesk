@@ -1,113 +1,27 @@
-# vinext-starter
+# My Desk
 
-A clean full-stack starter running on
-[vinext](https://github.com/cloudflare/vinext), with optional Cloudflare D1 and
-Drizzle support.
+개인별 일정, 시간표, 할 일과 Google Calendar를 한 화면에서 관리하는 Next.js 앱입니다. Vercel에서 실행합니다.
 
-## Prerequisites
+## 실행
 
-- Node.js `>=22.13.0`
-- Linux with `flock`, `curl`, and GNU `timeout`
+Node.js 22.13 이상에서 `npm ci`, `npm run dev`를 실행합니다. `npm run build`로 운영 빌드, `npm test`로 데이터 분리·PDF·캘린더·암호화 검증을 실행합니다.
 
-## Sites Lifecycle
+## Vercel 배포
 
-The Sites lifecycle CLI runs the locked dependency install before returning this checkout. Edit the source under `app/`, then checkpoint when a coherent milestone is ready to inspect or share. The remote Sites builder runs `npm run build` against the pushed commit. Do not repeat install or build as a normal pre-checkpoint step.
+GitHub 저장소를 연결하고 Framework Preset을 Next.js, Root Directory를 저장소 루트로 설정합니다. 출력 폴더는 기본값을 사용합니다. `vercel.json`이 빌드 설정을 제공합니다.
 
-This starter does not use `wrangler.jsonc`.
+Vercel의 무료 Neon 통합에서 Auth를 켜고 프로젝트를 연결합니다. `DATABASE_URL`과 `NEON_AUTH_BASE_URL`은 통합이 제공합니다. 32바이트 이상 난수로 생성한 `NEON_AUTH_COOKIE_SECRET`을 서버 환경변수에 저장합니다. 로컬에서는 `.env.local`을 사용하고 Git에 커밋하지 않습니다. `scripts/vercel-schema.sql`을 데이터베이스에 한 번 적용합니다. 이 스키마는 데이터나 계정을 생성하지 않습니다.
 
-`install:ci` is intentionally a single, non-retrying `npm ci`. It refuses a concurrent install for the same project, consumes a matching image-seeded npm cache with `--prefer-offline` while retaining registry fallback for a missing cache object, otherwise downloads and verifies the complete vinext tarball recorded in `package-lock.json`, limits npm to one socket, and terminates a stalled install. `build` applies a short timeout. These helpers target Linux and use GNU `timeout`; they are not native macOS scripts.
+## 개인 데이터
 
-Scripts that need writable project-scoped home, npm, XDG, and temporary paths use `scripts/sites-env.sh`. The `dev` and `start` scripts honor the caller's runtime environment and keep Wrangler logs inside the checkout. The generated `.sites-runtime/` directory is disposable and ignored by Git.
+이메일 인증번호로 가입·로그인합니다. API는 검증된 서버 세션의 사용자 ID로만 데이터를 읽고 씁니다. 처음 로그인한 사용자는 빈 데스크로 시작합니다. 이전 사이트의 자료를 자동으로 복원하거나 다른 사용자에게 복사하지 않습니다.
 
-## Included Shape
+Google Calendar의 비공개 iCal 주소는 각 사용자가 연결 설정에서 입력합니다. 서버에 암호화하여 저장하고 브라우저 응답에 주소를 돌려주지 않습니다. Google 일정 편집은 Google Calendar에서 진행합니다. 세션 비밀값을 바꾸면 기존 캘린더 암호화 값도 바뀌므로 사용자에게 재연결이 필요합니다.
 
-- edit site code under `app/`
-- `app/chatgpt-auth.ts` provides optional dispatch-owned ChatGPT sign-in helpers
-- `.openai/hosting.json` declares optional Sites D1 and R2 bindings
-- `vite.config.ts` simulates declared bindings for local development
-- `db/index.ts` reads the D1 binding from the Cloudflare Worker environment
-- `db/schema.ts` starts intentionally empty
-- `examples/d1/` contains an optional D1 example surface
-- `drizzle.config.ts` supports local migration generation when needed
+## 학사력 PDF
 
-## Workspace Auth Headers
+PDF 전체 페이지의 텍스트·표 좌표에서 학년도를 읽으며 다음 해 1·2월, 괄호 날짜와 기간 일정을 처리합니다. 같은 파일명으로 가져오면 해당 PDF의 일정만 갱신하며 직접 지정 일정은 유지합니다. 최대 5,000개이며 초과분을 조용히 자르지 않습니다. 스캔형 PDF는 OCR이 필요합니다. PDF 분석은 브라우저에서 수행하고 추출된 일정·파일명만 저장합니다. PDF 원본은 업로드하지 않습니다.
 
-OpenAI workspace sites can read the current user's email from
-`oai-authenticated-user-email`.
+## 보안
 
-SIWC-authenticated workspace sites may also receive
-`oai-authenticated-user-full-name` when the user's SIWC profile has a non-empty
-`name` claim. The full-name value is percent-encoded UTF-8 and is accompanied by
-`oai-authenticated-user-full-name-encoding: percent-encoded-utf-8`.
-
-Treat the full name as optional and fall back to email when it is absent:
-
-```tsx
-import { headers } from "next/headers";
-
-export default async function Home() {
-  const requestHeaders = await headers();
-  const email = requestHeaders.get("oai-authenticated-user-email");
-  const encodedFullName = requestHeaders.get("oai-authenticated-user-full-name");
-  const fullName =
-    encodedFullName &&
-    requestHeaders.get("oai-authenticated-user-full-name-encoding") ===
-      "percent-encoded-utf-8"
-      ? decodeURIComponent(encodedFullName)
-      : null;
-
-  const displayName = fullName ?? email;
-  // ...
-}
-```
-
-## Optional Dispatch-Owned ChatGPT Sign-In
-
-Import the ready-to-use helpers from `app/chatgpt-auth.ts` when the site needs
-optional or required ChatGPT sign-in:
-
-- Use `getChatGPTUser()` for optional signed-in UI.
-- Use `requireChatGPTUser(returnTo)` for server-rendered pages that should send
-  anonymous visitors through Sign in with ChatGPT.
-- In a Server Component, start sign-in with
-  `<a href={chatGPTSignInPath(returnTo)} target="_top">`. The auth helper
-  module is server-only; do not import it into a Client Component.
-- Do not use `fetch`, XHR, a client-side router, or a framework link that can
-  prefetch the sign-in route. SIWC must start as a top-level navigation.
-- Never request the AuthAPI authorization endpoint directly. The dispatch-owned
-  `/signin-with-chatgpt` route must start the SIWC flow.
-- Use `chatGPTSignOutPath(returnTo)` for browser sign-out links or actions.
-- Pass a same-origin relative `returnTo` path for the destination after sign-in
-  or sign-out. The helper validates and safely encodes it.
-- Mark protected pages with `export const dynamic = "force-dynamic"` because
-  they depend on per-request identity headers.
-
-Dispatch owns `/signin-with-chatgpt`, `/signout-with-chatgpt`, `/callback`, the
-OAuth cookies, and identity header injection. Do not implement app routes for
-those reserved paths. Routes that do not import and call the helper remain
-anonymous-compatible.
-
-SIWC establishes identity only; it does not prove workspace membership. Use the
-Sites hosting platform's access policy controls for workspace-wide restrictions,
-or enforce explicit server-side membership or allowlist checks.
-
-Use SIWC for account pages, user-specific dashboards, saved records, and write
-actions tied to the current ChatGPT user. Leave public content anonymous.
-
-## Diagnostic Commands
-
-- `npm run install:ci`: perform the one bounded lockfile install
-- `npm run dev`: start the Vite/Vinext development server
-- `npm run build`: build the deployable Sites artifact
-- `npm run start`: start the built Vinext application
-- `npm test`: build and verify the rendered development-preview metadata
-- `npm run db:generate`: generate Drizzle migrations after schema changes
-
-Use build commands for targeted diagnosis after a remote failure, not as part of the normal checkpoint path.
-
-The timeout defaults can be overridden for a controlled canary with `SITES_INSTALL_TIMEOUT`, `SITES_INSTALL_KILL_AFTER`, `SITES_BUILD_TIMEOUT`, and `SITES_BUILD_KILL_AFTER`. A timeout fails the command; the helpers never retry an unchanged install or build.
-
-## Learn More
-
-- [vinext Documentation](https://github.com/cloudflare/vinext)
-- [Drizzle D1 Guide](https://orm.drizzle.team/docs/get-started/d1-new)
+GitHub Actions의 Secret scan이 커밋 이력에 비밀키가 포함됐는지 검사합니다. `.env*`, 비공개 캘린더 주소, DB 연결 주소와 세션 키를 저장소에 넣지 마세요.

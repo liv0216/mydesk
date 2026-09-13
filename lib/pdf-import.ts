@@ -7,8 +7,7 @@ type PdfPage = PdfText[];
 
 async function readPdf(file: File): Promise<PdfPage[]> {
   const pdfjs = await import("pdfjs-dist");
-  const worker = await import("pdfjs-dist/build/pdf.worker.min.mjs?url");
-  pdfjs.GlobalWorkerOptions.workerSrc = worker.default;
+  pdfjs.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url).toString();
   const document = await pdfjs.getDocument({ data: await file.arrayBuffer() }).promise;
   const pages: PdfPage[] = [];
 

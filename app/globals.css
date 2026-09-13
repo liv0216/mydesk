@@ -596,3 +596,15 @@ footer span { font-weight: 900; letter-spacing: .13em; color: #536879; } footer 
 .account-signout,.calendar-connect-button {border:1px solid #d9e5ec;background:white;color:#46687e;border-radius:7px;padding:6px 8px;font-size:12px;cursor:pointer;}
 .connection-privacy {font-size:13px;line-height:1.6;color:#6b7f8e;margin:0;}
 @media(max-width:760px){.account-name{display:none}.account-signout{font-size:11px;padding:5px}.sign-in-card{padding:27px}}
+
+/* Email verification status and resend controls. */
+.sign-in-card .auth-delivery { padding: 13px 14px; border: 1px solid #d7e9f4; border-radius: 10px; background: #f2f8fc; color: #355970; font-size: 13px; line-height: 1.65; }
+.sign-in-card .auth-delivery strong { display: block; font-weight: 700; }
+.sign-in-card .auth-delivery p { margin: 5px 0 0; }
+.sign-in-card .auth-help { margin: -5px 0 0; font-size: 12px; line-height: 1.7; color: #687d8b; }
+.sign-in-card .auth-notice { color: #355970; }
+.sign-in-card .auth-secondary-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.sign-in-card .auth-resend { border: 1px solid #d4e1ea; border-radius: 8px; background: #fff; padding: 9px 11px; color: #36627c; font-size: 13px; cursor: pointer; }
+.sign-in-card button:disabled { opacity: .55; cursor: not-allowed; }
+.sign-in-card input:disabled { background: #f3f6f8; color: #607585; }
+.sign-in-card button:focus-visible, .sign-in-card input:focus-visible { outline: 2px solid #2c79e9; outline-offset: 3px; }

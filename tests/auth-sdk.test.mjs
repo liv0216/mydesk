@@ -55,3 +55,43 @@ test('SDK throws a normalized AuthApiError for an upstream INVALID_OTP response'
   });
   assertRequest(fetchMock, '/api/auth/sign-in/email-otp', { email, otp: '012345' });
 });
+
+test('SDK default sign-out sends JSON and propagates an upstream INVALID_ORIGIN rejection', async (t) => {
+  const fetchMock = mockResponse(t, {
+    code: 'INVALID_ORIGIN',
+    message: 'Invalid origin',
+  }, 403);
+  const client = createAuthClient();
+
+  await assert.rejects(client.signOut(), (error) => {
+    assert.ok(error instanceof AuthApiError);
+    assert.equal(error.status, 403);
+    assert.equal(error.message, 'Invalid origin');
+    return true;
+  });
+
+  assertRequest(fetchMock, '/api/auth/sign-out', {});
+  const [, init] = fetchMock.mock.calls[0].arguments;
+  // Headers stringify as {}, so inspect through their public API.
+  assert.equal(new Headers(init.headers).get('content-type'), 'application/json');
+  const request = new Request('https://desk.example.invalid/api/auth/sign-out', init);
+  assert.equal(request.headers.get('content-type'), 'application/json');
+});
+
+test('SDK sign-out forwards JSON headers and AbortSignal through its second fetch-options argument', async (t) => {
+  const fetchMock = mockResponse(t, { success: true });
+  const client = createAuthClient();
+  const signal = AbortSignal.timeout(15000);
+
+  const result = await client.signOut({}, {
+    headers: { 'Content-Type': 'application/json' },
+    signal,
+  });
+
+  assertRequest(fetchMock, '/api/auth/sign-out', {});
+  const [, init] = fetchMock.mock.calls[0].arguments;
+  assert.equal(new Headers(init.headers).get('content-type'), 'application/json');
+  assert.equal(init.signal, signal);
+  assert.equal(result.error, null);
+  assert.deepEqual(result.data, { success: true });
+});

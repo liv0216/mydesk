@@ -226,6 +226,8 @@ export default function Dashboard({ user }: { user: { id: string; email: string;
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
+  const signOutInFlight = useRef(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [hidden, setHidden] = useState<Record<string, boolean>>({});
   const [addMode, setAddMode] = useState<AddMode>(null);
@@ -243,6 +245,31 @@ export default function Dashboard({ user }: { user: { id: string; email: string;
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const calendarFileInput = useRef<HTMLInputElement>(null);
   const timetableFileInput = useRef<HTMLInputElement>(null);
+
+  async function signOut() {
+    if (signOutInFlight.current) return;
+    signOutInFlight.current = true; setSigningOut(true); setError("");
+    try {
+      const result = await authClient.signOut({}, { headers: { "Content-Type": "application/json" }, signal: AbortSignal.timeout(15000) });
+      if (result.error) throw result.error;
+      try { window.localStorage.setItem("mydesk:signout", JSON.stringify({ userId: user.id, at: Date.now() })); } catch { /* Cross-tab notification is optional. */ }
+      window.location.replace("/auth/sign-in");
+    } catch {
+      setError("로그아웃하지 못했어요. 연결을 확인한 뒤 다시 눌러 주세요.");
+      signOutInFlight.current = false; setSigningOut(false);
+    }
+  }
+
+  useEffect(() => {
+    const onStorage = (event: StorageEvent) => {
+      if (event.key !== "mydesk:signout" || !event.newValue) return;
+      try { if (JSON.parse(event.newValue).userId === user.id) window.location.replace("/auth/sign-in"); } catch { /* Ignore unrelated storage. */ }
+    };
+    const onPageShow = (event: PageTransitionEvent) => { if (event.persisted) window.location.reload(); };
+    window.addEventListener("storage", onStorage);
+    window.addEventListener("pageshow", onPageShow);
+    return () => { window.removeEventListener("storage", onStorage); window.removeEventListener("pageshow", onPageShow); };
+  }, [user.id]);
 
   const loadData = useCallback(async () => {
     try {
@@ -438,7 +465,7 @@ export default function Dashboard({ user }: { user: { id: string; email: string;
       <div className="ambient ambient-one" /><div className="ambient ambient-two" />
       <nav className="topbar" aria-label="대시보드 도구">
         <div className="brand-lockup"><span className="brand-mark"><LayoutGrid size={17} /></span><span className="brand-name">MY DESK</span><span className="today-label"><b>TODAY</b>{dateText}</span></div>
-        <div className="nav-actions"><span className="account-name" title={user.email}>{user.name || user.email}</span><button className="account-signout" onClick={async () => { setData(emptyData); await authClient.signOut(); window.location.assign("/"); }}>로그아웃</button>
+        <div className="nav-actions"><span className="account-name" title={user.email}>{user.name || user.email}</span><button className="account-signout" type="button" disabled={signingOut} onClick={() => void signOut()}>{signingOut ? "로그아웃 중…" : "로그아웃"}</button>
           <button className={`settings-button ${layoutEditing ? "active" : ""}`} onClick={() => layoutEditing ? finishLayoutEditing() : setLayoutEditing(true)} aria-pressed={layoutEditing}><Move size={17} /> {layoutEditing ? "배치 완료" : "배치 조정"}</button>
           <button className={`settings-button ${settingsOpen ? "active" : ""}`} onClick={() => setSettingsOpen((value) => !value)} aria-expanded={settingsOpen}><Settings2 size={17} /> 위젯 설정</button>
         </div>

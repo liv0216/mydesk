@@ -35,6 +35,7 @@ import { authClient } from "@/lib/auth/client";
 import { Switch } from "@/components/ui/switch";
 import { GoogleCalendarStatus, useGoogleCalendar } from "@/components/google-calendar";
 import { inspectAcademicPdf, extractTimetableEntries } from "@/lib/pdf-import";
+import { createDefaultLayout, getColumnCount, migrateLegacyLayout, normalizeLayout, resolveLayout, type ColumnCount, type GridItem, type WidgetId, type WidgetLayouts } from "@/lib/widget-layout";
 
 type Task = { id: number; text: string; tag: string; done: number | boolean };
 type Shortcut = { id: number; label: string; url: string; color: string };
@@ -50,20 +51,21 @@ const emptyData: DashboardData = { tasks: [], shortcuts: [], schedules: [], time
 const week = ["일", "월", "화", "수", "목", "금", "토"];
 const schoolDays = ["월", "화", "수", "목", "금"];
 const colorOptions = ["blue", "green", "red", "violet", "orange", "ink"];
-const layoutStorageKey = "my-desk-widget-layout-v2";
+const layoutStorageKey = "my-desk-widget-layout-v3";
+const legacyLayoutStorageKey = "my-desk-widget-layout-v2";
 
 
-type WidgetLayout = { x: number; y: number; width?: number; height?: number; manualSize?: boolean };
+type SavedLayouts = Partial<Record<ColumnCount, WidgetLayouts>>;
 type LayoutContextValue = {
   editing: boolean;
-  layouts: Record<string, WidgetLayout>;
+  columns: ColumnCount;
+  width: number;
+  layouts: WidgetLayouts;
   draggingId: string | null;
-  updateWidget: (id: string, patch: Partial<WidgetLayout>) => void;
+  updateWidget: (id: WidgetId, patch: Partial<GridItem>, baseline?: WidgetLayouts) => void;
   setDraggingId: (id: string | null) => void;
 };
-
 const LayoutContext = createContext<LayoutContextValue | null>(null);
-
 const widgetNames = [
   ["clock", "디지털 시계"], ["weather", "날씨"], ["shortcuts", "바로가기"],
   ["calendar", "통합 캘린더"], ["stats", "학급 현황"], ["timetable", "시간표"],
@@ -71,140 +73,70 @@ const widgetNames = [
 ] as const;
 
 function Widget({ id, title, icon, hidden, className = "", action, children }: {
-  id: string;
-  title: string;
-  icon: ReactNode;
-  hidden: Record<string, boolean>;
-  className?: string;
-  action?: ReactNode;
-  children: ReactNode;
+  id: WidgetId; title: string; icon: ReactNode; hidden: Record<string, boolean>;
+  className?: string; action?: ReactNode; children: ReactNode;
 }) {
   const layout = useContext(LayoutContext);
-  const sectionRef = useRef<HTMLElement>(null);
-  const dragStart = useRef<{ pointerX: number; pointerY: number; offsetX: number; offsetY: number; left: number; width: number } | null>(null);
-  const resizeStart = useRef<{ pointerX: number; pointerY: number; width: number; height: number } | null>(null);
-  const itemLayout = layout?.layouts[id] ?? { x: 0, y: 0 };
-  const positioned = itemLayout.x !== 0 || itemLayout.y !== 0;
+  const gesture = useRef<{ kind: "move" | "resize"; x: number; y: number; item: GridItem; baseline: WidgetLayouts; columns: ColumnCount; cellWidth: number } | null>(null);
+  if (!layout || hidden[id]) return null;
+  const item = layout.layouts[id];
 
-  const startDragging = (event: ReactPointerEvent<HTMLButtonElement>) => {
-    if (!layout?.editing) return;
-    event.preventDefault();
+  const startGesture = (kind: "move" | "resize", event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (!layout.editing) return;
+    event.preventDefault(); event.stopPropagation();
     event.currentTarget.setPointerCapture(event.pointerId);
-    const rect = sectionRef.current?.getBoundingClientRect();
-    dragStart.current = { pointerX: event.clientX, pointerY: event.clientY, offsetX: itemLayout.x, offsetY: itemLayout.y, left: rect?.left ?? 0, width: rect?.width ?? 0 };
+    gesture.current = { kind, x: event.clientX, y: event.clientY, item, baseline: layout.layouts, columns: layout.columns, cellWidth: (layout.width + 16) / layout.columns };
     layout.setDraggingId(id);
   };
-
-  const moveDragging = (event: ReactPointerEvent<HTMLButtonElement>) => {
-    if (!layout?.editing || !dragStart.current) return;
-    const rawDeltaX = event.clientX - dragStart.current.pointerX;
-    const minDeltaX = 14 - dragStart.current.left;
-    const maxDeltaX = window.innerWidth - 14 - dragStart.current.width - dragStart.current.left;
-    const deltaX = Math.max(minDeltaX, Math.min(maxDeltaX, rawDeltaX));
-    layout.updateWidget(id, {
-      x: Math.round(dragStart.current.offsetX + deltaX),
-      y: Math.round(Math.max(-700, Math.min(700, dragStart.current.offsetY + event.clientY - dragStart.current.pointerY))),
-    });
+  const moveGesture = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    const start = gesture.current;
+    if (!layout.editing || !start || start.columns !== layout.columns) return;
+    const dx = Math.round((event.clientX - start.x) / start.cellWidth);
+    const dy = Math.round((event.clientY - start.y) / 16);
+    layout.updateWidget(id, start.kind === "move"
+      ? { x: start.item.x + dx, y: start.item.y + dy }
+      : { w: start.item.w + dx, h: start.item.h + dy }, start.baseline);
   };
-
-  const stopDragging = (event: ReactPointerEvent<HTMLButtonElement>) => {
-    if (!dragStart.current) return;
-    dragStart.current = null;
-    if (layout && !itemLayout.manualSize && sectionRef.current) {
-      const rect = sectionRef.current.getBoundingClientRect();
-      const columns = Array.from(document.querySelectorAll<HTMLElement>(".dashboard-grid > .column"));
-      const target = columns.reduce<HTMLElement | null>((closest, column) => {
-        if (!closest) return column;
-        const center = rect.left + rect.width / 2;
-        const distance = Math.abs(column.getBoundingClientRect().left + column.getBoundingClientRect().width / 2 - center);
-        const closestDistance = Math.abs(closest.getBoundingClientRect().left + closest.getBoundingClientRect().width / 2 - center);
-        return distance < closestDistance ? column : closest;
-      }, null);
-      if (target) {
-        const targetRect = target.getBoundingClientRect();
-        layout.updateWidget(id, { x: Math.round(itemLayout.x + targetRect.left - rect.left), width: Math.round(targetRect.width) });
-      }
-    }
+  const stopGesture = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    gesture.current = null;
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
-    layout?.setDraggingId(null);
+    layout.setDraggingId(null);
   };
-
-  const nudgeWidget = (event: React.KeyboardEvent<HTMLButtonElement>) => {
-    if (!layout?.editing || !["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)) return;
+  const keyboardGesture = (kind: "move" | "resize", event: React.KeyboardEvent<HTMLButtonElement>) => {
+    if (!layout.editing || !["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)) return;
     event.preventDefault();
-    const step = event.shiftKey ? 32 : 12;
-    layout.updateWidget(id, {
-      x: itemLayout.x + (event.key === "ArrowLeft" ? -step : event.key === "ArrowRight" ? step : 0),
-      y: itemLayout.y + (event.key === "ArrowUp" ? -step : event.key === "ArrowDown" ? step : 0),
-    });
+    const dx = event.key === "ArrowLeft" ? -1 : event.key === "ArrowRight" ? 1 : 0;
+    const dy = (event.key === "ArrowUp" ? -1 : event.key === "ArrowDown" ? 1 : 0) * (event.shiftKey ? 4 : 1);
+    layout.updateWidget(id, kind === "move" ? { x: item.x + dx, y: item.y + dy } : { w: item.w + dx, h: item.h + dy });
   };
-
-  const startResizing = (event: ReactPointerEvent<HTMLButtonElement>) => {
-    if (!layout?.editing || !sectionRef.current) return;
-    event.preventDefault();
-    event.stopPropagation();
-    event.currentTarget.setPointerCapture(event.pointerId);
-    const rect = sectionRef.current.getBoundingClientRect();
-    resizeStart.current = { pointerX: event.clientX, pointerY: event.clientY, width: rect.width, height: rect.height };
-    layout.setDraggingId(id);
+  const restoreDefaultSize = () => {
+    const defaults = createDefaultLayout(layout.columns)[id];
+    layout.updateWidget(id, { w: defaults.w, h: defaults.h });
   };
-
-  const moveResizing = (event: ReactPointerEvent<HTMLButtonElement>) => {
-    if (!layout?.editing || !resizeStart.current) return;
-    const minimumWidth = Math.min(id === "calendar" || id === "timetable" ? 360 : 210, window.innerWidth - 28);
-    layout.updateWidget(id, {
-      width: Math.round(Math.max(minimumWidth, Math.min(window.innerWidth - 28, resizeStart.current.width + event.clientX - resizeStart.current.pointerX))),
-      height: Math.round(Math.max(140, Math.min(1000, resizeStart.current.height + event.clientY - resizeStart.current.pointerY))),
-      manualSize: true,
-    });
-  };
-
-  const stopResizing = (event: ReactPointerEvent<HTMLButtonElement>) => {
-    if (!resizeStart.current) return;
-    resizeStart.current = null;
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
-    layout?.setDraggingId(null);
-  };
-
-  const restoreAutomaticSize = () => layout?.updateWidget(id, { width: undefined, height: undefined, manualSize: false });
-
-  if (hidden[id]) return null;
   return (
     <section
-      ref={sectionRef}
-      className={`widget ${className} ${layout?.editing ? "layout-editing" : ""} ${layout?.draggingId === id ? "dragging" : ""} ${positioned ? "positioned" : ""} ${itemLayout.manualSize ? "manually-sized" : ""}`}
+      className={`widget ${className} ${layout.editing ? "layout-editing" : ""} ${layout.draggingId === id ? "dragging" : ""}`}
       aria-labelledby={`${id}-title`}
-      style={{ transform: `translate3d(${itemLayout.x}px, ${itemLayout.y}px, 0)`, width: itemLayout.width, height: itemLayout.height, zIndex: layout?.draggingId === id ? 30 : undefined }}
+      style={{ gridColumn: `${item.x + 1} / span ${item.w}`, gridRow: `${item.y + 1} / span ${item.h}` }}
     >
       <header className="widget-header">
         <div className="widget-title"><span className="widget-icon">{icon}</span><h2 id={`${id}-title`}>{title}</h2></div>
         <div className="widget-controls">
           {action}
-          <button
-            className="icon-button drag-handle"
-            aria-label={`${title} 위치 이동`}
-            title={layout?.editing ? "드래그하거나 방향키로 이동" : "위치 조정 모드에서 이동할 수 있어요"}
-            disabled={!layout?.editing}
-            onPointerDown={startDragging}
-            onPointerMove={moveDragging}
-            onPointerUp={stopDragging}
-            onPointerCancel={stopDragging}
-            onKeyDown={nudgeWidget}
-          ><Move size={16} /></button>
+          <button className="icon-button drag-handle" aria-label={`${title} 위치 이동`}
+            title={layout.editing ? "드래그하거나 방향키로 이동 · 겹치는 위젯은 아래로 정리" : "위치 조정 모드에서 이동할 수 있어요"}
+            disabled={!layout.editing} onPointerDown={event => startGesture("move", event)}
+            onPointerMove={moveGesture} onPointerUp={stopGesture} onPointerCancel={stopGesture}
+            onKeyDown={event => keyboardGesture("move", event)}><Move size={16} /></button>
         </div>
       </header>
-      <div className="widget-body" tabIndex={id === "calendar" || id === "schedule" ? 0 : undefined}>{children}</div>
-      <button
-        className="resize-handle"
-        aria-label={`${title} 크기 조정`}
-        title="드래그로 크기 조정 · 내용이 넘치면 내부 스크롤 · 두 번 누르면 자동 크기"
-        tabIndex={layout?.editing ? 0 : -1}
-        onPointerDown={startResizing}
-        onPointerMove={moveResizing}
-        onPointerUp={stopResizing}
-        onPointerCancel={stopResizing}
-        onDoubleClick={restoreAutomaticSize}
-      ><Maximize2 size={13} /></button>
+      <div className="widget-body" tabIndex={0} role="region" aria-label={`${title} 내용`}>{children}</div>
+      <button className="resize-handle" aria-label={`${title} 크기 조정`}
+        title="드래그나 방향키로 크기 조정 · 내용은 내부 스크롤 · 두 번 누르면 기본 크기"
+        disabled={!layout.editing} tabIndex={layout.editing ? 0 : -1}
+        onPointerDown={event => startGesture("resize", event)} onPointerMove={moveGesture}
+        onPointerUp={stopGesture} onPointerCancel={stopGesture}
+        onKeyDown={event => keyboardGesture("resize", event)} onDoubleClick={restoreDefaultSize}><Maximize2 size={13} /></button>
     </section>
   );
 }
@@ -241,7 +173,11 @@ export default function Dashboard({ user }: { user: { id: string; email: string;
   const [statusDraft, setStatusDraft] = useState<ClassStatus>(emptyClassStatus);
   const [layoutEditing, setLayoutEditing] = useState(false);
   const [layoutReady, setLayoutReady] = useState(false);
-  const [widgetLayouts, setWidgetLayouts] = useState<Record<string, WidgetLayout>>({});
+  const [widgetLayouts, setWidgetLayouts] = useState<SavedLayouts>({});
+  const [columns, setColumns] = useState<ColumnCount>(12);
+  const [gridWidth, setGridWidth] = useState(1200);
+  const gridRef = useRef<HTMLDivElement>(null);
+  const activeLayout = useMemo(() => resolveLayout(widgetLayouts[columns] ?? createDefaultLayout(columns), columns), [widgetLayouts, columns]);
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const calendarFileInput = useRef<HTMLInputElement>(null);
   const timetableFileInput = useRef<HTMLInputElement>(null);
@@ -296,34 +232,54 @@ export default function Dashboard({ user }: { user: { id: string; email: string;
   }, [data.classStatus]);
 
   useEffect(() => {
-    let restored: Record<string, WidgetLayout> = {};
-    try {
-      const stored = window.localStorage.getItem(layoutStorageKey + ":" + user.id);
-      if (stored) restored = JSON.parse(stored);
-    } catch {
-      // A blocked local store should not prevent dashboard use.
-    }
-    const restoreTimer = window.setTimeout(() => {
-      setWidgetLayouts(restored);
-      setLayoutReady(true);
-    }, 0);
-    return () => window.clearTimeout(restoreTimer);
+    const grid = gridRef.current;
+    if (!grid) return;
+    const measure = () => { setGridWidth(grid.getBoundingClientRect().width); setColumns(getColumnCount(window.innerWidth)); };
+    const frame = window.requestAnimationFrame(measure);
+    const observer = new ResizeObserver(measure);
+    observer.observe(grid);
+    window.addEventListener("resize", measure);
+    return () => { window.cancelAnimationFrame(frame); observer.disconnect(); window.removeEventListener("resize", measure); };
   }, []);
 
   useEffect(() => {
-    if (!layoutReady) return;
+    const restored: SavedLayouts = {};
     try {
-      window.localStorage.setItem(layoutStorageKey + ":" + user.id, JSON.stringify(widgetLayouts));
-    } catch {
-      // Keep the in-memory layout when local storage is unavailable.
-    }
-  }, [layoutReady, widgetLayouts]);
+      const stored = window.localStorage.getItem(layoutStorageKey + ":" + user.id);
+      if (stored) {
+        const parsed: unknown = JSON.parse(stored);
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          for (const count of [12, 8, 4] as const) {
+            const value = (parsed as Record<string, unknown>)[count];
+            if (value) restored[count] = normalizeLayout(value, count);
+          }
+        }
+      } else {
+        const legacy = window.localStorage.getItem(legacyLayoutStorageKey + ":" + user.id);
+        if (legacy) {
+          const count = getColumnCount(window.innerWidth);
+          restored[count] = migrateLegacyLayout(JSON.parse(legacy), count, gridRef.current?.getBoundingClientRect().width ?? 1200);
+        }
+      }
+    } catch { /* Unavailable or invalid storage falls back to a safe layout. */ }
+    const timer = window.setTimeout(() => { setWidgetLayouts(restored); setLayoutReady(true); }, 0);
+    return () => window.clearTimeout(timer);
+  }, [user.id]);
 
-  const updateWidget = useCallback((id: string, patch: Partial<WidgetLayout>) => {
-    setWidgetLayouts((current) => ({ ...current, [id]: { ...current[id], x: patch.x ?? current[id]?.x ?? 0, y: patch.y ?? current[id]?.y ?? 0, ...patch } }));
-  }, []);
+  useEffect(() => {
+    if (!layoutReady || draggingId) return;
+    try { window.localStorage.setItem(layoutStorageKey + ":" + user.id, JSON.stringify(widgetLayouts)); }
+    catch { /* Keep the in-memory layout when local storage is unavailable. */ }
+  }, [layoutReady, widgetLayouts, draggingId, user.id]);
 
-  const restoreAutomaticSizes = () => setWidgetLayouts((current) => Object.fromEntries(Object.entries(current).map(([id, item]) => [id, { x: item.x, y: item.y }])));
+  const updateWidget = useCallback((id: WidgetId, patch: Partial<GridItem>, baseline?: WidgetLayouts) => {
+    setWidgetLayouts(current => ({ ...current, [columns]: resolveLayout(baseline ?? current[columns] ?? createDefaultLayout(columns), columns, id, patch) }));
+  }, [columns]);
+  const restoreDefaultSizes = () => {
+    const defaults = createDefaultLayout(columns);
+    setWidgetLayouts(current => ({ ...current, [columns]: normalizeLayout(Object.fromEntries(Object.entries(activeLayout).map(([id, item]) => [id, { ...item, w: defaults[id as WidgetId].w, h: defaults[id as WidgetId].h }])), columns) }));
+  };
+  const restoreDefaultPositions = () => setWidgetLayouts(current => ({ ...current, [columns]: createDefaultLayout(columns) }));
 
   const finishLayoutEditing = () => {
     setDraggingId(null);
@@ -460,7 +416,7 @@ export default function Dashboard({ user }: { user: { id: string; email: string;
   const dateText = now ? new Intl.DateTimeFormat("ko-KR", { month: "long", day: "numeric", weekday: "long" }).format(now) : "오늘";
 
   return (
-    <LayoutContext.Provider value={{ editing: layoutEditing, layouts: widgetLayouts, draggingId, updateWidget, setDraggingId }}>
+    <LayoutContext.Provider value={{ editing: layoutEditing, columns, width: gridWidth, layouts: activeLayout, draggingId, updateWidget, setDraggingId }}>
     <main className="dashboard-shell">
       <div className="ambient ambient-one" /><div className="ambient ambient-two" />
       <nav className="topbar" aria-label="대시보드 도구">
@@ -473,7 +429,7 @@ export default function Dashboard({ user }: { user: { id: string; email: string;
 
       {error && <div className="status-banner error"><X size={16} /><span>{error}</span><button onClick={() => setError("")}>닫기</button></div>}
       {importStatus && <div className="status-banner success"><FileUp size={16} /><span>{importStatus}</span><button onClick={() => setImportStatus("")}>닫기</button></div>}
-      {layoutEditing && <div className="layout-toolbar"><div><Move size={17} /><span><strong>위젯 배치 조정 중</strong> 오른쪽 아래 핸들로 크기를 정하세요. 내용이 위젯보다 많아지면 카드 안에서 스크롤할 수 있습니다.</span></div><div className="layout-toolbar-actions"><button onClick={restoreAutomaticSizes}><Maximize2 size={14} /> 크기 자동</button><button onClick={() => setWidgetLayouts({})}><RotateCcw size={14} /> 기본 위치</button><button className="done" onClick={finishLayoutEditing}><Check size={14} /> 완료</button></div></div>}
+      {layoutEditing && <div className="layout-toolbar"><div><Move size={17} /><span><strong>위젯 배치 조정 중</strong> 드래그하거나 방향키로 이동·크기를 조정하세요. 위젯은 겹치지 않게 정리되고, 내용은 카드 안에서 스크롤됩니다.</span></div><div className="layout-toolbar-actions"><button onClick={restoreDefaultSizes}><Maximize2 size={14} /> 기본 크기</button><button onClick={restoreDefaultPositions}><RotateCcw size={14} /> 기본 위치</button><button className="done" onClick={finishLayoutEditing}><Check size={14} /> 완료</button></div></div>}
 
       {settingsOpen && (
         <aside className="settings-panel" aria-label="위젯 표시 설정">
@@ -482,7 +438,7 @@ export default function Dashboard({ user }: { user: { id: string; email: string;
         </aside>
       )}
 
-      <div className="dashboard-grid">
+      <div className="dashboard-grid" ref={gridRef} style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}>
         <div className="column left-column">
           <Widget id="clock" title="디지털 시계" icon={<TimerReset size={16} />} hidden={hidden} className="clock-widget">
             <div className="clock-face"><span>{timeText}</span><small>{secondText}</small></div><div className="clock-meta"><span>서울</span><span>MY DESK</span></div>
@@ -546,7 +502,7 @@ export default function Dashboard({ user }: { user: { id: string; email: string;
 
           <Widget id="timetable" title="주간 시간표" icon={<BookOpen size={16} />} hidden={hidden} className="timetable-widget" action={<div className="header-actions"><input ref={timetableFileInput} className="sr-only" type="file" accept="application/pdf" onChange={(event) => void importPdf(event, "timetable")} /><button className="widget-add secondary" disabled={busy} onClick={() => timetableFileInput.current?.click()}><FileUp size={14} /> 시간표 PDF</button><button className="widget-add" onClick={() => openTimetable()}><Plus size={14} /> 수업</button></div>}>
             <div className="timetable-head"><span>교시</span>{schoolDays.map((day) => <span key={day}>{day}</span>)}</div>
-            {Array.from({ length: 7 }, (_, periodIndex) => periodIndex + 1).map((period) => <div className="timetable-row editable-row" key={period}><span>{period}</span>{schoolDays.map((_, day) => {
+            {Array.from({ length: Math.min(10, Math.max(7, ...data.timetable.map(item => item.period))) }, (_, periodIndex) => periodIndex + 1).map((period) => <div className="timetable-row editable-row" key={period}><span>{period}</span>{schoolDays.map((_, day) => {
               const entry = data.timetable.find((item) => item.day === day && item.period === period);
               return entry ? <div className="timetable-cell filled" key={day}><button onClick={() => openTimetable(day, period)}><strong>{entry.subject}</strong>{entry.location && <small>{entry.location}</small>}</button><button className="cell-delete" onClick={() => void deleteResource("timetable", entry.id)} aria-label={`${entry.subject} 삭제`}><X size={10} /></button></div> : <button className="timetable-cell empty" key={day} onClick={() => openTimetable(day, period)} aria-label={`${schoolDays[day]}요일 ${period}교시 추가`}><Plus size={12} /></button>;
             })}</div>)}

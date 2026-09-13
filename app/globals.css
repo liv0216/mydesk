@@ -138,49 +138,55 @@ button { color: inherit; }
   position: relative;
   z-index: 2;
   display: grid;
-  grid-template-columns: minmax(220px, .78fr) minmax(430px, 1.45fr) minmax(300px, 1fr);
-  align-items: start;
-  gap: 16px;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  grid-auto-rows: 8px;
+  align-items: stretch;
+  gap: 8px 16px;
 }
 
-.column { display: grid; gap: 16px; min-width: 0; }
+.column { display: contents; }
 .widget {
   position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  max-width: 100%;
+  overflow: hidden;
   background: rgba(255, 254, 251, .94);
   border: 1px solid rgba(190, 207, 216, .86);
   border-radius: 17px;
   padding: 14px;
   box-shadow: var(--shadow);
   min-width: 0;
-  transition: transform .18s ease, box-shadow .18s ease;
+  transition: box-shadow .18s ease;
 }
 .widget:hover { box-shadow: 0 18px 38px rgba(50, 83, 105, .13), 0 3px 8px rgba(37, 62, 82, .08); }
-.widget-header { display: flex; align-items: center; justify-content: space-between; padding-bottom: 12px; border-bottom: 1px solid #eaf0f2; }
+.widget-header { display: flex; flex: 0 0 auto; flex-wrap: wrap; gap: 6px; align-items: center; justify-content: space-between; padding-bottom: 12px; border-bottom: 1px solid #eaf0f2; }
 .widget-title { gap: 8px; }
 .widget-title h2 { margin: 0; font-size: 12px; font-weight: 850; }
 .widget-icon { color: var(--blue); width: 26px; height: 26px; display: grid; place-items: center; border-radius: 8px; background: var(--blue-soft); }
 .widget-controls { display: flex; align-items: center; justify-content: flex-end; gap: 6px; min-width: 0; }
 .drag-handle { color: #a2adb5; cursor: default; }
 .drag-handle:disabled { opacity: .35; cursor: default; }
-.widget.layout-editing { outline: 2px dashed rgba(44, 121, 233, .32); outline-offset: 3px; will-change: transform; }
+.widget.layout-editing { outline: 2px dashed rgba(44, 121, 233, .32); outline-offset: 2px; }
 .widget.layout-editing .drag-handle { color: var(--blue); background: #eaf3ff; cursor: grab; touch-action: none; opacity: 1; }
 .widget.layout-editing .drag-handle:hover { background: #dcecff; }
 .widget.dragging { outline-color: var(--blue); box-shadow: 0 22px 52px rgba(35, 88, 145, .24); transition: none; user-select: none; }
 .widget.dragging .drag-handle { cursor: grabbing; }
 .widget-body {
+  flex: 1 1 auto;
   min-width: 0;
   min-height: 0;
-  max-height: min(640px, 72vh);
-  overflow-y: auto;
+  overflow: auto;
+  scrollbar-gutter: stable;
   overscroll-behavior: contain;
   scrollbar-width: thin;
   scrollbar-color: #b9cad7 transparent;
 }
 .widget-body::-webkit-scrollbar { width: 6px; }
 .widget-body::-webkit-scrollbar-thumb { border-radius: 999px; background: #b9cad7; }
-.widget.manually-sized { display: flex; flex-direction: column; overflow: hidden; }
-.widget.manually-sized .widget-header { flex: 0 0 auto; }
-.widget.manually-sized .widget-body { flex: 1 1 auto; max-height: none; overflow-y: auto; }
+.widget-body:focus-visible { outline: 2px solid var(--blue); outline-offset: -2px; border-radius: 4px; }
 .resize-handle {
   width: 25px;
   height: 25px;
@@ -258,7 +264,6 @@ button { color: inherit; }
 .mini-bars { display: grid; gap: 4px; }
 .mini-bars span { height: 4px; border-radius: 9px; background: linear-gradient(90deg, #4a87e4, #80cdb7); }
 
-.calendar-widget { min-height: 362px; }
 .calendar-view-options { padding: 3px; background: #f0f4f7; border-radius: 10px; }
 .calendar-view-options button { padding: 6px 9px; }
 .calendar-view-options button[aria-pressed="true"] { background: white; color: #1959b2; box-shadow: 0 1px 4px #17283a18; }
@@ -463,8 +468,6 @@ footer { max-width: 1500px; margin: 22px auto 0; padding-top: 18px; border-top: 
 footer span { font-weight: 900; letter-spacing: .13em; color: #536879; } footer p { margin: 0; }
 
 @media (max-width: 1050px) {
-  .dashboard-grid { grid-template-columns: .8fr 1.35fr; }
-  .right-column { grid-column: 1 / -1; grid-template-columns: repeat(3, 1fr); }
   .topbar { grid-template-columns: minmax(0, 1fr) auto; }
   .settings-button { width: 38px; padding: 0; font-size: 0; }
 }
@@ -473,10 +476,7 @@ footer span { font-weight: 900; letter-spacing: .13em; color: #536879; } footer 
   .dashboard-shell { padding: 0 14px 20px; }
   .topbar { height: 62px; display: flex; }
   .nav-actions { margin-left: auto; }
-  .dashboard-grid { grid-template-columns: 1fr; }
-  .right-column { grid-column: auto; grid-template-columns: 1fr; }
   .settings-grid { grid-template-columns: 1fr 1fr; }
-  .calendar-widget { min-height: auto; }
   .dates span { min-height: 40px; }
   .layout-toolbar { align-items: flex-start; flex-direction: column; }
   .layout-toolbar-actions { width: 100%; justify-content: flex-end; }
@@ -577,14 +577,7 @@ footer span { font-weight: 900; letter-spacing: .13em; color: #536879; } footer 
 @media (max-width: 470px) { .unified-calendar-widget .cell-events em { font-size: .5625rem; padding: 2px; } }
 
 .unified-calendar-widget .cell-events em { white-space: pre-line; }
-/* Event changes stay inside their cards, keeping nearby and moved widgets in place.
-   Inline dimensions from the resize handle still override these default heights. */
-.unified-calendar-widget, .schedule-widget { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
-.unified-calendar-widget { height: clamp(620px, 80vh, 820px); }
-.schedule-widget { height: 300px; }
-.unified-calendar-widget .widget-header, .schedule-widget .widget-header { flex: 0 0 auto; }
-.unified-calendar-widget .widget-body, .schedule-widget .widget-body { flex: 1 1 auto; max-height: none; overflow-y: auto; scrollbar-gutter: stable; }
-.unified-calendar-widget .widget-body:focus-visible, .schedule-widget .widget-body:focus-visible { outline: 2px solid var(--blue); outline-offset: -2px; border-radius: 4px; }
+/* Every card occupies explicit grid cells; its content cannot expand the card. */
 
 .sign-in-screen { min-height:100vh; display:grid;place-items:center;padding:24px;background:radial-gradient(ellipse at top left,#ddeefa,transparent 60%),#f3f7f9; }
 .sign-in-card { width:min(100%,420px);padding:36px;background:white;border:1px solid #dce7ee;border-radius:22px;box-shadow:0 18px 60px #27486512; }
